@@ -39,7 +39,7 @@ dialog{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-
   <b>Connexion</b>
   <label>URL Supabase</label><input id="cUrl" placeholder="https://xxxx.supabase.co">
   <label>Clé « anon public »</label><input id="cKey">
-  <label>Clé API IA gratuite (Gemini — utilisée en permanence avec l’OCR local)</label><input id="cAiKey" type="password" autocomplete="off" placeholder="AIza...">
+  <label>Clé API IA gratuite (Gemini — utilisée en permanence avec l’OCR local)</label><input id="cAiKey" type="password" autocomplete="off" placeholder="AQ....">
   <label>Email</label><input id="cMail" type="email" autocomplete="username">
   <label>Mot de passe</label><input id="cPw" type="password" autocomplete="current-password">
   <div class="row"><button id="bLogin">Connexion</button><button id="bSign" class="sec">Créer le compte</button></div>
@@ -132,6 +132,7 @@ Table déjà créée avant cette version ? Lancez : <code>alter table expenses a
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script>
 const $=s=>document.querySelector(s);
+const DEFAULT_AI_KEY='AQ.Ab8RN6JGP_sCGDnjozMpDNZJ63KnrYQtMUi_w3DHcEunFVOHFA';
 let sb,user,blob,rows=[],lastV=[],lastA=[],worker=null;
 const DEF=['Assurance','Taxe foncière','Travaux','Entretien / réparation','Ameublement','Décoration','Électroménager','Charges / copropriété','Frais de gestion','Frais bancaires / emprunt','Autre'];
 let S={cats:[],apts:[]};
@@ -149,6 +150,12 @@ const fr=s=>s?s.split('-').reverse().join('/'):'';
 const safeUrl=u=>u?encodeURI(String(u).trim()):'';
 const round2=n=>Math.round((Number(n)+Number.EPSILON)*100)/100;
 
+function getAiKey(){
+  const stored=(cfg().aiKey||'').trim();
+  const field=$('#cAiKey')?$('#cAiKey').value.trim():'';
+  return field||stored||DEFAULT_AI_KEY;
+}
+
 function extractStoragePath(url){
   if(!url)return '';
   try{
@@ -164,7 +171,7 @@ function extractStoragePath(url){
 
 async function init(){
   const c=cfg();
-  $('#cUrl').value=c.url||'';$('#cKey').value=c.key||'';$('#cAiKey').value=c.aiKey||'';
+  $('#cUrl').value=c.url||'';$('#cKey').value=c.key||'';$('#cAiKey').value=(c.aiKey||DEFAULT_AI_KEY);
   if(c.url&&c.key){
     sb=supabase.createClient(c.url,c.key);
     const {data}=await sb.auth.getSession();
@@ -173,7 +180,7 @@ async function init(){
   $('#login').classList.remove('hide');
 }
 function saveCfg(){
-  localStorage.setItem('cfg',JSON.stringify({url:$('#cUrl').value.trim(),key:$('#cKey').value.trim(),aiKey:$('#cAiKey').value.trim()}));
+  localStorage.setItem('cfg',JSON.stringify({url:$('#cUrl').value.trim(),key:$('#cKey').value.trim(),aiKey:getAiKey()}));
   const c=cfg();sb=supabase.createClient(c.url,c.key);
 }
 async function auth(sign){
@@ -507,33 +514,45 @@ function blobToBase64(b){
 }
 
 async function askAiVision(imgBlob){
-  const aiKey=(cfg().aiKey||'').trim()||($('#cAiKey')?$('#cAiKey').value.trim():'');
+  const aiKey=getAiKey();
   if(!aiKey)return null;
   const b64=await blobToBase64(imgBlob);
-  const resp=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(aiKey)}`,{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      contents:[{
-        parts:[
-          {text:'Extrais de ce ticket ou cette facture : vendor (nom commercial ou fournisseur), date (format YYYY-MM-DD, date d’émission/achat), amount (montant total TTC en nombre décimal, ex. 42.50). Réponds uniquement avec un objet JSON valide, sans markdown.'},
-          {inline_data:{mime_type:imgBlob.type||'image/jpeg',data:b64}}
-        ]
-      }],
-      generationConfig:{responseMimeType:'application/json'}
-    })
-  });
-  if(!resp.ok)throw new Error('HTTP '+resp.status);
-  const json=await resp.json();
-  const txt=json?.candidates?.[0]?.content?.parts?.[0]?.text||'{}';
-  const parsed=JSON.parse(txt);
-  const amtNum=Number(String(parsed.amount??'').replace(',','.'));
-  return {
-    vendor:String(parsed.vendor||'').trim(),
-    date:/^\d{4}-\d{2}-\d{2}$/.test(String(parsed.date||''))?String(parsed.date):'',
-    amount:!Number.isNaN(amtNum)&&amtNum>0?round2(amtNum).toFixed(2):'',
-    rawJson:txt
-  };
+  const models=['gemini-2.5-flash','gemini-2.5-flash-lite','gemini-2.0-flash'];
+  let lastErr=null;
+
+  for(const model of models){
+    const resp=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,{
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'x-goog-api-key':aiKey
+      },
+      body:JSON.stringify({
+        contents:[{
+          parts:[
+            {text:'Extrais de ce ticket ou cette facture : vendor (nom commercial ou fournisseur), date (format YYYY-MM-DD, date d’émission/achat), amount (montant total TTC en nombre décimal, ex. 42.50). Réponds uniquement avec un objet JSON valide, sans markdown.'},
+            {inline_data:{mime_type:imgBlob.type||'image/jpeg',data:b64}}
+          ]
+        }],
+        generationConfig:{responseMimeType:'application/json'}
+      })
+    });
+    if(resp.ok){
+      const json=await resp.json();
+      const txt=json?.candidates?.[0]?.content?.parts?.[0]?.text||'{}';
+      const parsed=JSON.parse(txt);
+      const amtNum=Number(String(parsed.amount??'').replace(',','.'));
+      return {
+        vendor:String(parsed.vendor||'').trim(),
+        date:/^\d{4}-\d{2}-\d{2}$/.test(String(parsed.date||''))?String(parsed.date):'',
+        amount:!Number.isNaN(amtNum)&&amtNum>0?round2(amtNum).toFixed(2):'',
+        rawJson:`[${model}] ${txt}`
+      };
+    }
+    lastErr=new Error('HTTP '+resp.status);
+    if(resp.status!==404)throw lastErr;
+  }
+  throw lastErr||new Error('HTTP 404');
 }
 
 function renderChips(){
@@ -572,7 +591,7 @@ $('#file').onchange=async e=>{
   $('#preview').src=URL.createObjectURL(blob);$('#preview').style.display='block';
   $('#chips').innerHTML='';$('#raw').textContent='';
 
-  const hasAi=Boolean((cfg().aiKey||'').trim()||($('#cAiKey')&&$('#cAiKey').value.trim()));
+  const hasAi=Boolean(getAiKey());
   let o={vendor:'',date:'',amount:'',vendors:[],amounts:[]};
   let ai=null,aiErr='';
 
@@ -616,7 +635,7 @@ $('#file').onchange=async e=>{
     $('#status').textContent=(miss.length?'⚠️ OCR incomplet ('+miss.join(', ')+') · ':'✅ OCR local · ')+'IA non joignable ('+aiErr+').';
   }else{
     $('#status').textContent=miss.length
-      ?'⚠️ OCR local : non lu '+miss.join(', ')+'. (Ajoutez une clé API IA gratuite dans Connexion pour la double lecture IA.)'
+      ?'⚠️ OCR local : non lu '+miss.join(', ')+'.'
       :'✅ OCR local : vérifiez magasin, date et montant TTC avant d’enregistrer.';
   }
 };
