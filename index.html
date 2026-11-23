@@ -127,6 +127,7 @@ const dd=s=>new Date(s+'T00:00:00');
 const addDays=(s,n)=>{const d=dd(s);d.setDate(d.getDate()+n);return iso(d)};
 const nights=(a,b)=>a&&b?Math.max(0,Math.round((dd(b)-dd(a))/864e5)):0;
 const fr=s=>s?s.split('-').reverse().join('/'):'';
+const safeUrl=u=>u?encodeURI(String(u).trim()):'';
 
 async function init(){
   const c=cfg();
@@ -173,7 +174,6 @@ function tab(n){
 }
 $('#t1').onclick=()=>tab(1);$('#t2').onclick=()=>tab(2);$('#t3').onclick=()=>tab(3);
 
-// ---------- Loyer : arrivée / départ / nuits ----------
 function syncN(from){
   const a=$('#fDate').value;
   if(from==='n'){const n=parseInt($('#fNights').value)||0;if(a&&n>0)$('#fEnd').value=addDays(a,n)}
@@ -198,7 +198,6 @@ $('#fKind').onchange=()=>{
   if(l){blob=null;$('#file').value='';$('#preview').style.display='none';if(!$('#fEnd').value)$('#fEnd').value=addDays($('#fDate').value||today(),1);syncN()}
 };
 
-// ---------- Réglages ----------
 function loadS(){
   const m=(user&&user.user_metadata)||{};
   S.cats=m.cats&&m.cats.length?m.cats:DEF.slice();
@@ -245,31 +244,29 @@ async function delCat(i){S.cats.splice(i,1);await persist();fillSel();renderSet(
 $('#fApt').onchange=()=>{if($('#fApt').value==='__new__')addApt()};
 $('#fCat').onchange=()=>{if($('#fCat').value==='__new__')addCat()};
 
-// ---------- Images ----------
-function shrink(file){return new Promise(res=>{
-  const img=new Image();img.onload=()=>{
-    const k=Math.min(1,1600/Math.max(img.width,img.height));
-    const c=document.createElement('canvas');c.width=img.width*k;c.height=img.height*k;
-    c.getContext('2d').drawImage(img,0,0,c.width,c.height);
-    c.toBlob(b=>res(b),'image/jpeg',.82)};
-  img.src=URL.createObjectURL(file)})}
-// Image pour l'OCR : agrandie, niveaux de gris, contraste étiré
-function prep(file){return new Promise(res=>{
-  const img=new Image();img.onload=()=>{
-    const k=Math.min(2,2400/Math.max(img.width,img.height));
-    const c=document.createElement('canvas');c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);
-    const x=c.getContext('2d');x.drawImage(img,0,0,c.width,c.height);
-    const d=x.getImageData(0,0,c.width,c.height),p=d.data,h=new Uint32Array(256);
-    for(let i=0;i<p.length;i+=4){const g=(p[i]*.299+p[i+1]*.587+p[i+2]*.114)|0;p[i]=g;h[g]++}
-    const n=c.width*c.height;let a=0,lo=0,hi=255;
-    for(let i=0;i<256;i++){a+=h[i];if(a>n*.01){lo=i;break}}
-    a=0;for(let i=255;i>=0;i--){a+=h[i];if(a>n*.01){hi=i;break}}
-    const s=255/Math.max(1,hi-lo);
-    for(let i=0;i<p.length;i+=4){const v=Math.max(0,Math.min(255,(p[i]-lo)*s));p[i]=p[i+1]=p[i+2]=v}
-    x.putImageData(d,0,0);c.toBlob(b=>res(b),'image/png')};
-  img.src=URL.createObjectURL(file)})}
+async function shrink(file){
+  const bmp=await createImageBitmap(file,{imageOrientation:'from-image'});
+  const k=Math.min(1,1600/Math.max(bmp.width,bmp.height));
+  const c=document.createElement('canvas');c.width=Math.round(bmp.width*k);c.height=Math.round(bmp.height*k);
+  c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);bmp.close();
+  return new Promise(res=>c.toBlob(b=>res(b),'image/jpeg',.82));
+}
+async function prep(file){
+  const bmp=await createImageBitmap(file,{imageOrientation:'from-image'});
+  const k=Math.min(2,2000/Math.max(bmp.width,bmp.height));
+  const c=document.createElement('canvas');c.width=Math.max(1,Math.round(bmp.width*k));c.height=Math.max(1,Math.round(bmp.height*k));
+  const x=c.getContext('2d');x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';
+  x.drawImage(bmp,0,0,c.width,c.height);bmp.close();
+  const img=x.getImageData(0,0,c.width,c.height),p=img.data;
+  for(let i=0;i<p.length;i+=4){
+    const g=p[i]*.299+p[i+1]*.587+p[i+2]*.114;
+    const v=Math.max(0,Math.min(255,(g-128)*1.25+128));
+    p[i]=p[i+1]=p[i+2]=v;
+  }
+  x.putImageData(img,0,0);
+  return new Promise(res=>c.toBlob(b=>res(b),'image/png'));
+}
 
-// ---------- Lecture du ticket ----------
 const norm=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
 const key=s=>norm(s).replace(/[^a-z0-9]/g,'');
 const BRANDS=['Leroy Merlin','Castorama','Brico Dépôt','Bricomarché','Mr Bricolage','Weldom','Bricorama','Point P','IKEA','Conforama','Maisons du Monde','Gifi','Action','La Foir’Fouille','Carrefour','Leclerc','Auchan','Intermarché','Lidl','Monoprix','Super U','Franprix','Picard','Amazon','Cdiscount','Darty','Boulanger','Fnac','Decathlon','Kiabi','Orange','SFR','Bouygues','EDF','Engie','TotalEnergies','Veolia','La Poste','Axa','Allianz','MAIF','Groupama','Booking','Airbnb','Cedeo','Tollens','Lapeyre','Alinea','Cuisinella','Vert Baudet','Hornbach'];
@@ -302,16 +299,19 @@ function pickAmount(L){
   if(best&&!all.includes(best))all.unshift(best);
   return {best,all:all.slice(0,6)};
 }
+function fixDateOcr(s){
+  return norm(s).replace(/([0-9])[oOlI](?=[0-9\/.\-])/g,'$10').replace(/(?<=[\/.\-])[oOlI]([0-9])/g,'0$1');
+}
 function pickDate(L){
   const maxY=new Date().getFullYear()+1,c=[];
   const ok=(d,m,y)=>{d=+d;m=+m;y=+y;if(y<100)y+=2000;return d>=1&&d<=31&&m>=1&&m<=12&&y>=2015&&y<=maxY?`${y}-${p2(m)}-${p2(d)}`:null};
   L.forEach((l,i)=>{
-    const t=norm(l).replace(/(\d)o(?=\d)/g,(m,a)=>a+'0');
+    const t=fixDateOcr(l);
     if(/echeance|valid|limite|expir|naissance/.test(t))return;
-    const sc=(/date|facture|emis|vente|ticket/.test(t)?2:1)-i*.001;let m;
+    const sc=(/date|facture|emis|vente|ticket|le\b|du\b/.test(t)?2:1)-i*.001;let m;
     const r1=/(\d{1,2})\s?[\/.\-]\s?(\d{1,2})\s?[\/.\-]\s?(\d{4}|\d{2})(?!\d)/g;
     while((m=r1.exec(t))){const d=ok(m[1],m[2],m[3]);if(d)c.push([sc,d])}
-    const r2=/(\d{4})-(\d{2})-(\d{2})/g;
+    const r2=/(\d{4})[\/.\-](\d{2})[\/.\-](\d{2})/g;
     while((m=r2.exec(t))){const d=ok(m[3],m[2],m[1]);if(d)c.push([sc,d])}
     const r3=/(\d{1,2})\s+(janv|jan|fevr|fev|mars|mar|avril|avr|mai|juin|juil|aout|sept|sep|oct|nov|dec)[a-z.]*\s+(\d{4}|\d{2})/g;
     while((m=r3.exec(t))){const d=ok(m[1],MOIS[m[2]],m[3]);if(d)c.push([sc,d])}
@@ -382,7 +382,6 @@ $('#file').onchange=async e=>{
   }catch(err){$('#status').textContent='Lecture impossible, saisissez à la main.'}
 };
 
-// ---------- Enregistrement ----------
 $('#bSave').onclick=async()=>{
   const loy=$('#fKind').value==='loyer';
   if(!$('#fAmt').value||!$('#fDate').value||!$('#fApt').value){$('#status').textContent='Date, montant et appartement requis.';return}
@@ -409,7 +408,6 @@ $('#bSave').onclick=async()=>{
   $('#bSave').disabled=false;
 };
 
-// ---------- Récap ----------
 async function load(){
   const y=$('#yr').value;
   const {data,error}=await sb.from('expenses').select('*').gte('date',y+'-01-01').lte('date',y+'-12-31').order('date');
@@ -433,7 +431,7 @@ function render(){
     h+=`<h3>${esc(a)}</h3><p>Loyers : <b>${eur(s(L))}</b>${N?` (${N} nuits)`:''} · Dépenses : <b>${eur(s(D))}</b> · Résultat : <b>${eur(s(L)-s(D))}</b></p><table><tr><th>Date</th><th>Type</th><th>Libellé</th><th>Catégorie</th><th class="n">Montant</th><th>Commentaire</th><th>Pièce</th><th class="noprint"></th></tr>`;
     g[a].forEach(r=>{
       const l=r.kind==='loyer',n=nights(r.date,r.date_end);
-      h+=`<tr><td>${l&&r.date_end?`${fr(r.date)} → ${fr(r.date_end)} (${n} n.)`:fr(r.date)}</td><td>${l?'Loyer':'Dépense'}</td><td>${esc(r.vendor)}</td><td>${esc(r.category)}</td><td class="n">${eur(r.amount)}</td><td style="white-space:normal">${esc(r.comment)}</td><td>${r.receipt_url?`<a href="${r.receipt_url}" target="_blank">voir</a>`:''}</td><td class="noprint"><button class="del" style="color:var(--ac);border-color:var(--ac)" onclick="edit('${r.id}')">✏️</button> <button class="del" onclick="del('${r.id}')">✕</button></td></tr>`});
+      h+=`<tr><td>${l&&r.date_end?`${fr(r.date)} → ${fr(r.date_end)} (${n} n.)`:fr(r.date)}</td><td>${l?'Loyer':'Dépense'}</td><td>${esc(r.vendor)}</td><td>${esc(r.category)}</td><td class="n">${eur(r.amount)}</td><td style="white-space:normal">${esc(r.comment)}</td><td>${r.receipt_url?`<a href="${esc(safeUrl(r.receipt_url))}" target="_blank" rel="noopener">voir</a>`:''}</td><td class="noprint"><button class="del" style="color:var(--ac);border-color:var(--ac)" onclick="edit('${r.id}')">✏️</button> <button class="del" onclick="del('${r.id}')">✕</button></td></tr>`});
     h+='</table>';
   }
   $('#list').innerHTML=h;
@@ -448,7 +446,7 @@ function edit(id){
   $('#eEndBox').classList.toggle('hide',!l);$('#eCatBox').classList.toggle('hide',l);
   $('#eApt').innerHTML=opt(apts(),r.apartment);
   $('#eCat').innerHTML=opt(S.cats,r.category);
-  $('#eImg').innerHTML=r.receipt_url?`<a href="${r.receipt_url}" target="_blank">Voir la pièce jointe</a>`:'';
+  $('#eImg').innerHTML=r.receipt_url?`<a href="${esc(safeUrl(r.receipt_url))}" target="_blank" rel="noopener">Voir la pièce jointe</a>`:'';
   $('#dlg').showModal();
 }
 $('#eSave').onclick=async()=>{
@@ -484,7 +482,6 @@ $('#bCsv').onclick=()=>{
   a.download=`notes-de-frais-${$('#yr').value}.csv`;a.click();
 };
 
-// ---------- PDF / archive ----------
 const f2=n=>Number(n||0).toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,' ')+' EUR';
 async function makePdf(save=true){
   const y=$('#yr').value;
@@ -513,21 +510,21 @@ async function makePdf(save=true){
     T('Détail des dépenses',['Date','Fournisseur','Catégorie','Commentaire','Justificatif','Montant'],D.map(r=>[fr(r.date),r.vendor||'',r.category||'',r.comment||'',r.receipt_url?'':'-',f2(r.amount)]),{
       didDrawCell:h=>{
         if(h.section!=='body'||h.column.index!==4)return;
-        const r=D[h.row.index];if(!r||!r.receipt_url)return;
+        const r=D[h.row.index],url=safeUrl(r&&r.receipt_url);if(!url)return;
         doc.setFontSize(9);doc.setTextColor(37,99,235);
-        doc.textWithLink('Pièce '+num[r.id],h.cell.x+2,h.cell.y+h.cell.height/2+1.2,{url:r.receipt_url});
-        doc.link(h.cell.x,h.cell.y,h.cell.width,h.cell.height,{url:r.receipt_url});
+        doc.textWithLink('Pièce '+num[r.id],h.cell.x+2,h.cell.y+h.cell.height*.65,{url});
         doc.setTextColor(0);
       }
     });
     if(W.length){
       if(cy>240){doc.addPage();cy=18}
-      doc.setFontSize(12);doc.setTextColor(0);doc.text('Liens des justificatifs',14,cy+4);cy+=11;
-      doc.setFontSize(7);
+      doc.setFontSize(12);doc.setTextColor(0);doc.text('Liens des justificatifs',14,cy+4);cy+=10;
+      doc.setFontSize(8);
       W.forEach((r,k)=>{
-        if(cy>282){doc.addPage();cy=18}
-        doc.setTextColor(0);doc.text(`${k+1}. ${fr(r.date)} - ${(r.vendor||'').slice(0,30)} - ${f2(r.amount)}`,14,cy);
-        cy+=3.5;doc.setTextColor(37,99,235);doc.textWithLink(r.receipt_url,14,cy,{url:r.receipt_url});cy+=5.5;
+        const url=safeUrl(r.receipt_url);if(!url)return;
+        if(cy>278){doc.addPage();cy=18}
+        doc.setTextColor(0);doc.text(`${k+1}. ${fr(r.date)} - ${(r.vendor||'').slice(0,35)} - ${f2(r.amount)}`,14,cy);
+        cy+=4;doc.setTextColor(37,99,235);doc.textWithLink('Ouvrir le justificatif ('+(r.vendor||'Pièce')+')',14,cy,{url});cy+=6;
       });
       doc.setTextColor(0);
     }
@@ -548,7 +545,7 @@ $('#bArch').onclick=async()=>{
   for(const r of imgs){
     st.textContent=`Téléchargement ${++n}/${imgs.length}…`;
     try{
-      const b=await (await fetch(r.receipt_url)).blob();
+      const b=await (await fetch(safeUrl(r.receipt_url))).blob();
       let name=`${clean(r.apartment)}/${r.date}_${clean(r.vendor)}_${r.amount}`;
       used[name]=(used[name]||0)+1;if(used[name]>1)name+='_'+used[name];
       zip.file(name+'.jpg',b);
