@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Notes de frais LMNP</title>
 <style>
-:root{--bg:#f6f7f9;--card:#fff;--tx:#1c1f24;--mut:#6b7280;--ac:#2563eb;--bd:#e2e5ea;--ok:#16a34a;--ko:#dc2626}
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1c1f24;--mut:#6b7280;--ac:#2563eb;--bd:#e2e5ea;--ko:#dc2626}
 @media (prefers-color-scheme:dark){:root{--bg:#111418;--card:#1b1f25;--tx:#e8eaee;--mut:#9aa3af;--ac:#5b8def;--bd:#2c323a}}
 *{box-sizing:border-box}
 body{margin:0;font:16px/1.4 system-ui,sans-serif;background:var(--bg);color:var(--tx);padding:12px;max-width:900px;margin:auto}
@@ -16,14 +16,16 @@ input,select,textarea,button{font:inherit;width:100%;padding:10px;border-radius:
 button{background:var(--ac);color:#fff;border:0;cursor:pointer;font-weight:600;margin-top:10px}
 button.sec{background:transparent;color:var(--ac);border:1px solid var(--ac)}
 button.del{width:auto;padding:4px 8px;margin:0;background:transparent;color:var(--ko);border:1px solid var(--ko);font-size:12px}
+button.chip{width:auto;padding:4px 10px;margin:4px 4px 0 0;background:transparent;color:var(--ac);border:1px solid var(--ac);border-radius:16px;font-size:13px;font-weight:500}
 .row{display:flex;gap:8px}.row>*{flex:1}
 .tabs{display:flex;gap:8px;margin-bottom:12px}.tabs button{margin:0;background:var(--card);color:var(--tx);border:1px solid var(--bd)}.tabs button.on{background:var(--ac);color:#fff}
 #preview{max-width:100%;max-height:220px;border-radius:8px;display:none;margin-top:10px}
-#status{font-size:13px;color:var(--mut);margin-top:8px}
+#status,#cnt,#arSt{font-size:13px;color:var(--mut);margin-top:8px}
+#chips{font-size:13px;color:var(--mut);margin-top:6px}
 .hide{display:none!important}
 .tw{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:14px}
 th,td{padding:6px 8px;border-bottom:1px solid var(--bd);text-align:left;white-space:nowrap}
-td.n,th.n{text-align:right}tr.sub td{font-weight:700;background:var(--bg)}
+td.n,th.n{text-align:right}
 a{color:var(--ac)}details{font-size:13px;color:var(--mut);margin-top:10px}pre{white-space:pre-wrap;background:var(--bg);padding:8px;border-radius:8px;font-size:12px;color:var(--tx)}
 dialog{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:12px;width:min(92vw,420px);padding:14px}dialog::backdrop{background:rgba(0,0,0,.5)}
 @media print{body{background:#fff;color:#000}.noprint,.tabs{display:none!important}.card{border:0}}
@@ -32,7 +34,6 @@ dialog{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-
 <body>
 <h1>🧾 Notes de frais LMNP</h1>
 
-<!-- CONFIG + LOGIN -->
 <div id="login" class="card hide">
   <b>Connexion</b>
   <label>URL Supabase</label><input id="cUrl" placeholder="https://xxxx.supabase.co">
@@ -41,41 +42,32 @@ dialog{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-
   <label>Mot de passe</label><input id="cPw" type="password" autocomplete="current-password">
   <div class="row"><button id="bLogin">Connexion</button><button id="bSign" class="sec">Créer le compte</button></div>
   <div id="lmsg" style="color:var(--ko);font-size:13px;margin-top:8px"></div>
-  <details><summary>Installation Supabase (SQL à coller une fois)</summary>
-<pre>create table expenses (
-  id uuid primary key default gen_random_uuid(),
-  created_at timestamptz default now(),
-  user_id uuid default auth.uid(),
-  date date, vendor text, amount numeric(10,2),
-  apartment text, category text, comment text, receipt_url text,
-  kind text default 'depense'
-);
-alter table expenses enable row level security;
-create policy "mine" on expenses for all
-  using (auth.uid()=user_id) with check (auth.uid()=user_id);
-
-insert into storage.buckets (id,name,public)
-  values ('receipts','receipts',true);
-create policy "up" on storage.objects for insert
-  to authenticated with check (bucket_id='receipts');
-create policy "rm" on storage.objects for delete
-  to authenticated using (bucket_id='receipts');</pre>
-Si la table existe déjà : <code>alter table expenses add column kind text default 'depense';</code><br>Ensuite, dans Authentication → Providers → Email, désactivez « Confirm email » si vous voulez vous connecter tout de suite, et désactivez les inscriptions après avoir créé votre compte.
+  <details><summary>Installation Supabase (SQL, un bloc à la fois)</summary>
+<pre>create table expenses (id uuid primary key default gen_random_uuid(), created_at timestamptz default now(), user_id uuid default auth.uid(), date date, date_end date, vendor text, amount numeric(10,2), apartment text, category text, comment text, receipt_url text, kind text default 'depense');</pre>
+<pre>alter table expenses enable row level security;
+create policy "mine" on expenses for all using (auth.uid()=user_id) with check (auth.uid()=user_id);</pre>
+<pre>insert into storage.buckets (id,name,public) values ('receipts','receipts',true);
+create policy "up" on storage.objects for insert to authenticated with check (bucket_id='receipts');
+create policy "rm" on storage.objects for delete to authenticated using (bucket_id='receipts');</pre>
+Table déjà créée avant cette version ? Lancez : <code>alter table expenses add column if not exists kind text default 'depense'; alter table expenses add column if not exists date_end date;</code>
   </details>
 </div>
 
-<!-- APP -->
 <div id="app" class="hide">
   <div class="tabs"><button id="t1" class="on">➕ Ajouter</button><button id="t2">📊 Récap</button><button id="t3">⚙️ Réglages</button></div>
 
   <div id="p1" class="card">
     <label>Type</label><select id="fKind"><option value="depense">Dépense (ticket / facture)</option><option value="loyer">Loyer reçu</option></select>
-    <div id="photoBox"><label>Photo du ticket / de la facture</label>
+    <div id="photoBox"><label>Photo du ticket / de la facture (bien à plat, bien éclairée)</label>
     <input id="file" type="file" accept="image/*" capture="environment">
-    <img id="preview" alt=""></div>
+    <img id="preview" alt="">
+    <div id="chips"></div>
+    <details><summary>Texte lu par l’OCR</summary><pre id="raw"></pre></details></div>
     <div id="status"></div>
     <div class="row"><div><label id="dateL">Date</label><input id="fDate" type="date"></div>
-    <div><label>Montant TTC (€)</label><input id="fAmt" type="number" step="0.01" inputmode="decimal"></div></div>
+    <div id="endBox" class="hide"><label>Départ</label><input id="fEnd" type="date"></div></div>
+    <div id="nightBox" class="row hide"><div><label>Nombre de nuits</label><input id="fNights" type="number" min="1" inputmode="numeric"></div><div><label>Prix par nuit</label><input id="fPpn" disabled></div></div>
+    <label id="amtL">Montant TTC (€)</label><input id="fAmt" type="number" step="0.01" inputmode="decimal">
     <label id="venL">Fournisseur</label><input id="fVen">
     <div class="row"><div><label>Appartement</label><select id="fApt"></select></div>
     <div id="catBox"><label>Catégorie</label><select id="fCat"></select></div></div>
@@ -92,19 +84,21 @@ Si la table existe déjà : <code>alter table expenses add column kind text defa
   </div>
 
   <div id="p2" class="card hide">
-    <div class="row noprint"><select id="yr"></select><select id="aptF"></select></div>
-    <div class="row noprint"><button id="bCsv">⬇️ Export CSV</button><button id="bPrint" class="sec">🖨️ Imprimer / PDF</button></div>
-    <button id="bPdf" class="noprint">📄 Dossier comptable PDF (les 2 appartements)</button>
-    <button id="bArch" class="sec noprint">🗄️ Archiver l’année (ZIP photos + PDF)</button>
-    <button id="bFree" class="sec noprint" style="color:var(--ko);border-color:var(--ko)">🧹 Libérer l’espace : supprimer les photos de l’année</button>
-    <div id="arSt" class="noprint" style="font-size:13px;color:var(--mut);margin-top:8px"></div>
+    <div class="row noprint"><div><label>Année (affichage, PDF, archivage)</label><select id="yr"></select></div><div><label>Appartement</label><select id="aptF"></select></div></div>
+    <div id="cnt" class="noprint"></div>
+    <div class="row noprint"><button id="bCsv">⬇️ Export CSV</button><button id="bPrint" class="sec">🖨️ Imprimer</button></div>
+    <button id="bPdf" class="noprint">📄 Dossier comptable PDF (tous les appartements)</button>
+    <button id="bArch" class="sec noprint">🗄️ Archiver l’année choisie (ZIP photos + PDF)</button>
+    <button id="bFree" class="sec noprint" style="color:var(--ko);border-color:var(--ko)">🧹 Libérer l’espace : supprimer les photos de l’année choisie</button>
+    <div id="arSt" class="noprint"></div>
     <div id="list" class="tw" style="margin-top:12px"></div>
   </div>
 </div>
 
 <dialog id="dlg">
   <b>Modifier la ligne</b>
-  <div class="row"><div><label>Date</label><input id="eDate" type="date"></div><div><label>Montant (€)</label><input id="eAmt" type="number" step="0.01" inputmode="decimal"></div></div>
+  <div class="row"><div><label id="eDateL">Date</label><input id="eDate" type="date"></div><div id="eEndBox"><label>Départ</label><input id="eEnd" type="date"></div></div>
+  <label>Montant (€)</label><input id="eAmt" type="number" step="0.01" inputmode="decimal">
   <label>Libellé (fournisseur / locataire)</label><input id="eVen">
   <div class="row"><div><label>Appartement</label><select id="eApt"></select></div><div id="eCatBox"><label>Catégorie</label><select id="eCat"></select></div></div>
   <label>Commentaire</label><textarea id="eCom" rows="2"></textarea>
@@ -119,13 +113,20 @@ Si la table existe déjà : <code>alter table expenses add column kind text defa
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script>
 const $=s=>document.querySelector(s);
-let sb,user,blob,rows=[];
+let sb,user,blob,rows=[],lastV=[],lastA=[],worker=null;
 const DEF=['Assurance','Taxe foncière','Travaux','Entretien / réparation','Ameublement','Décoration','Électroménager','Charges / copropriété','Frais de gestion','Frais bancaires / emprunt','Autre'];
 let S={cats:[],apts:[]};
 const cfg=()=>{try{return JSON.parse(localStorage.getItem('cfg')||'{}')}catch(e){return{}}};
 const apts=()=>S.apts.map(a=>a.name);
 const eur=n=>Number(n||0).toLocaleString('fr-FR',{style:'currency',currency:'EUR'});
 const esc=s=>String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const p2=n=>String(n).padStart(2,'0');
+const iso=d=>d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate());
+const today=()=>iso(new Date());
+const dd=s=>new Date(s+'T00:00:00');
+const addDays=(s,n)=>{const d=dd(s);d.setDate(d.getDate()+n);return iso(d)};
+const nights=(a,b)=>a&&b?Math.max(0,Math.round((dd(b)-dd(a))/864e5)):0;
+const fr=s=>s?s.split('-').reverse().join('/'):'';
 
 async function init(){
   const c=cfg();
@@ -155,25 +156,49 @@ $('#bOut').onclick=async()=>{await sb.auth.signOut();location.reload()};
 
 function showApp(){
   $('#login').classList.add('hide');$('#app').classList.remove('hide');
-  loadS();fillSel();renderSet();
-  const y=new Date().getFullYear();
-  $('#yr').innerHTML=[y,y-1,y-2].map(v=>`<option>${v}</option>`).join('');
-  $('#fDate').valueAsDate=new Date();
+  loadS();fillSel();renderSet();fillYears();
+  $('#fDate').value=today();
   if(!S.apts.length)setTimeout(()=>{alert('Commencez par ajouter votre premier appartement.');tab(3)},150);
+}
+async function fillYears(){
+  const y=new Date().getFullYear(),keep=$('#yr').value;let min=y;
+  try{const {data}=await sb.from('expenses').select('date').not('date','is',null).order('date').limit(1);if(data&&data[0])min=Math.min(y,+data[0].date.slice(0,4))}catch(e){}
+  const a=[];for(let i=y;i>=min;i--)a.push(i);
+  $('#yr').innerHTML=a.map(v=>`<option>${v}</option>`).join('');
+  $('#yr').value=keep&&a.includes(+keep)?keep:y;
 }
 function tab(n){
   [1,2,3].forEach(i=>{$('#p'+i).classList.toggle('hide',n!=i);$('#t'+i).classList.toggle('on',n==i)});
-  if(n==2)load();
+  if(n==2)fillYears().then(load);
 }
 $('#t1').onclick=()=>tab(1);$('#t2').onclick=()=>tab(2);$('#t3').onclick=()=>tab(3);
 
+// ---------- Loyer : arrivée / départ / nuits ----------
+function syncN(from){
+  const a=$('#fDate').value;
+  if(from==='n'){const n=parseInt($('#fNights').value)||0;if(a&&n>0)$('#fEnd').value=addDays(a,n)}
+  else $('#fNights').value=nights(a,$('#fEnd').value)||'';
+  const n=parseInt($('#fNights').value)||0,m=parseFloat($('#fAmt').value)||0;
+  $('#fPpn').value=n&&m?eur(m/n):'';
+}
+$('#fDate').onchange=()=>{
+  if($('#fKind').value!=='loyer')return;
+  const e=$('#fEnd').value;
+  if(!e||e<=$('#fDate').value)$('#fEnd').value=addDays($('#fDate').value,1);
+  syncN();
+};
+$('#fEnd').onchange=()=>syncN();$('#fNights').oninput=()=>syncN('n');$('#fAmt').oninput=()=>syncN();
 $('#fKind').onchange=()=>{
   const l=$('#fKind').value==='loyer';
-  $('#photoBox').classList.toggle('hide',l);$('#catBox').classList.toggle('hide',l);
-  $('#venL').textContent=l?'Locataire / période (ex. Dupont – mars)':'Fournisseur';
-  $('#dateL').textContent=l?'Date de réception':'Date';
-  if(l){blob=null;$('#file').value='';$('#preview').style.display='none'}
+  ['photoBox','catBox'].forEach(i=>$('#'+i).classList.toggle('hide',l));
+  ['endBox','nightBox'].forEach(i=>$('#'+i).classList.toggle('hide',!l));
+  $('#venL').textContent=l?'Locataire (ex. Dupont)':'Fournisseur';
+  $('#dateL').textContent=l?'Arrivée':'Date';
+  $('#amtL').textContent=l?'Loyer encaissé pour le séjour (€)':'Montant TTC (€)';
+  if(l){blob=null;$('#file').value='';$('#preview').style.display='none';if(!$('#fEnd').value)$('#fEnd').value=addDays($('#fDate').value||today(),1);syncN()}
 };
+
+// ---------- Réglages ----------
 function loadS(){
   const m=(user&&user.user_metadata)||{};
   S.cats=m.cats&&m.cats.length?m.cats:DEF.slice();
@@ -219,66 +244,179 @@ async function delApt(i){
 async function delCat(i){S.cats.splice(i,1);await persist();fillSel();renderSet()}
 $('#fApt').onchange=()=>{if($('#fApt').value==='__new__')addApt()};
 $('#fCat').onchange=()=>{if($('#fCat').value==='__new__')addCat()};
-// Réduction image
+
+// ---------- Images ----------
 function shrink(file){return new Promise(res=>{
   const img=new Image();img.onload=()=>{
-    const m=1600,k=Math.min(1,m/Math.max(img.width,img.height));
+    const k=Math.min(1,1600/Math.max(img.width,img.height));
     const c=document.createElement('canvas');c.width=img.width*k;c.height=img.height*k;
     c.getContext('2d').drawImage(img,0,0,c.width,c.height);
     c.toBlob(b=>res(b),'image/jpeg',.82)};
   img.src=URL.createObjectURL(file)})}
+// Image pour l'OCR : agrandie, niveaux de gris, contraste étiré
+function prep(file){return new Promise(res=>{
+  const img=new Image();img.onload=()=>{
+    const k=Math.min(2,2400/Math.max(img.width,img.height));
+    const c=document.createElement('canvas');c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);
+    const x=c.getContext('2d');x.drawImage(img,0,0,c.width,c.height);
+    const d=x.getImageData(0,0,c.width,c.height),p=d.data,h=new Uint32Array(256);
+    for(let i=0;i<p.length;i+=4){const g=(p[i]*.299+p[i+1]*.587+p[i+2]*.114)|0;p[i]=g;h[g]++}
+    const n=c.width*c.height;let a=0,lo=0,hi=255;
+    for(let i=0;i<256;i++){a+=h[i];if(a>n*.01){lo=i;break}}
+    a=0;for(let i=255;i>=0;i--){a+=h[i];if(a>n*.01){hi=i;break}}
+    const s=255/Math.max(1,hi-lo);
+    for(let i=0;i<p.length;i+=4){const v=Math.max(0,Math.min(255,(p[i]-lo)*s));p[i]=p[i+1]=p[i+2]=v}
+    x.putImageData(d,0,0);c.toBlob(b=>res(b),'image/png')};
+  img.src=URL.createObjectURL(file)})}
 
-// Lecture du ticket
+// ---------- Lecture du ticket ----------
+const norm=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+const key=s=>norm(s).replace(/[^a-z0-9]/g,'');
+const BRANDS=['Leroy Merlin','Castorama','Brico Dépôt','Bricomarché','Mr Bricolage','Weldom','Bricorama','Point P','IKEA','Conforama','Maisons du Monde','Gifi','Action','La Foir’Fouille','Carrefour','Leclerc','Auchan','Intermarché','Lidl','Monoprix','Super U','Franprix','Picard','Amazon','Cdiscount','Darty','Boulanger','Fnac','Decathlon','Kiabi','Orange','SFR','Bouygues','EDF','Engie','TotalEnergies','Veolia','La Poste','Axa','Allianz','MAIF','Groupama','Booking','Airbnb','Cedeo','Tollens','Lapeyre','Alinea','Cuisinella','Vert Baudet','Hornbach'];
+const MOIS={janv:1,jan:1,fevr:2,fev:2,mars:3,mar:3,avr:4,avril:4,mai:5,juin:6,juil:7,aout:8,sept:9,sep:9,oct:10,nov:11,dec:12};
+function lev(a,b){const m=[];for(let i=0;i<=a.length;i++)m[i]=[i];for(let j=1;j<=b.length;j++)m[0][j]=j;
+  for(let i=1;i<=a.length;i++)for(let j=1;j<=b.length;j++)m[i][j]=Math.min(m[i-1][j]+1,m[i][j-1]+1,m[i-1][j-1]+(a[i-1]===b[j-1]?0:1));return m[a.length][b.length]}
+function amounts(line){
+  const t=line.replace(/\d{1,2}\s?[\/.\-]\s?\d{1,2}\s?[\/.\-]\s?\d{2,4}/g,' ').replace(/\d+[,.]?\d*\s?%/g,' ')
+    .replace(/(\d)[oO](?=\d)/g,(m,a)=>a+'0').replace(/(\d)[lI|](?=\d)/g,(m,a)=>a+'1');
+  const re=/(\d{1,3}(?:[ .]\d{3})+|\d+)\s?[,.]\s?(\d{2})(?!\d)/g,out=[];let m;
+  while((m=re.exec(t)))out.push(parseFloat(m[1].replace(/[ .]/g,'')+'.'+m[2]));
+  return out.filter(v=>v>0&&v<100000);
+}
+function pickAmount(L){
+  const T1=/net a payer|total ttc|montant ttc|total a payer|a regler|reste a payer|total general|net ttc|ttc a payer|total t\.?t\.?c/;
+  const T2=/total|montant|somme/,T3=/carte|\bcb\b|visa|mastercard|especes|paiement|reglement|cheque|virement/;
+  const BAD=/\bht\b|h\.t|hors taxe|tva|t\.v\.a|base|remise|rendu|monnaie|sous.?total|economie|fidelite|point|acompte|taxe|recu/;
+  const get=i=>{let v=amounts(L[i]);if(!v.length&&L[i+1])v=amounts(L[i+1]);return v};
+  const tier=(re,bad)=>{const c=[];L.forEach((l,i)=>{const n=norm(l);if(re.test(n)&&(bad||!BAD.test(n)))c.push(...get(i))});return c};
+  let best=0,c=tier(T1,true);
+  if(!c.length)c=tier(T2,false);
+  if(!c.length)c=tier(T3,false);
+  if(c.length)best=Math.max(...c);
+  const ht=[],tv=[];
+  L.forEach((l,i)=>{const n=norm(l);if(/\bht\b|h\.t|hors taxe/.test(n))ht.push(...get(i));else if(/tva|t\.v\.a/.test(n))tv.push(...amounts(l))});
+  const H=ht.length?Math.max(...ht):0;
+  if(H){const T=[...new Set(tv)].filter(v=>v<H*.25).reduce((a,b)=>a+b,0);if((!best||Math.abs(best-H)<.011)&&T>0)best=+(H+T).toFixed(2)}
+  const all=[...new Set(L.flatMap(l=>{const n=norm(l);return BAD.test(n)&&!T1.test(n)?[]:amounts(l)}))].sort((a,b)=>b-a).slice(0,6);
+  if(!best&&all.length)best=all[0];
+  if(best&&!all.includes(best))all.unshift(best);
+  return {best,all:all.slice(0,6)};
+}
+function pickDate(L){
+  const maxY=new Date().getFullYear()+1,c=[];
+  const ok=(d,m,y)=>{d=+d;m=+m;y=+y;if(y<100)y+=2000;return d>=1&&d<=31&&m>=1&&m<=12&&y>=2015&&y<=maxY?`${y}-${p2(m)}-${p2(d)}`:null};
+  L.forEach((l,i)=>{
+    const t=norm(l).replace(/(\d)o(?=\d)/g,(m,a)=>a+'0');
+    if(/echeance|valid|limite|expir|naissance/.test(t))return;
+    const sc=(/date|facture|emis|vente|ticket/.test(t)?2:1)-i*.001;let m;
+    const r1=/(\d{1,2})\s?[\/.\-]\s?(\d{1,2})\s?[\/.\-]\s?(\d{4}|\d{2})(?!\d)/g;
+    while((m=r1.exec(t))){const d=ok(m[1],m[2],m[3]);if(d)c.push([sc,d])}
+    const r2=/(\d{4})-(\d{2})-(\d{2})/g;
+    while((m=r2.exec(t))){const d=ok(m[3],m[2],m[1]);if(d)c.push([sc,d])}
+    const r3=/(\d{1,2})\s+(janv|jan|fevr|fev|mars|mar|avril|avr|mai|juin|juil|aout|sept|sep|oct|nov|dec)[a-z.]*\s+(\d{4}|\d{2})/g;
+    while((m=r3.exec(t))){const d=ok(m[1],MOIS[m[2]],m[3]);if(d)c.push([sc,d])}
+  });
+  c.sort((a,b)=>b[0]-a[0]);return c.length?c[0][1]:'';
+}
+function brand(L){
+  const top=L.slice(0,14).map(key);
+  for(const l of top)for(const B of BRANDS){const k=key(B);if(k.length>=4&&l.includes(k))return B}
+  for(const B of BRANDS){const k=key(B),tol=k.length>8?2:1;if(k.length<5)continue;
+    for(const l of top)for(let i=0;i+k.length<=l.length;i++)if(lev(k,l.substr(i,k.length))<=tol)return B}
+  const all=L.map(key).join(' ');
+  for(const B of BRANDS){const k=key(B);if(k.length>=4&&all.includes(k))return B}
+  return '';
+}
+function vendors(L){
+  const J=/\b(ticket|facture|caisse|client|tel|siret|siren|tva|cedex|merci|bienvenue|date|code|total|montant|eur)\b|www|http|@|\brue\b|avenue|boulevard|n°|\d{5}/;
+  const c=[];
+  L.slice(0,12).forEach((l,i)=>{
+    const n=norm(l),lt=(l.match(/[A-Za-zÀ-ÿ]/g)||[]).length;
+    if(lt<3||lt/l.length<.5||l.length>45||J.test(n))return;
+    const up=(l.match(/[A-ZÀ-Ý]/g)||[]).length/lt;
+    const s=lt+(up>.7?8:0)+(/sarl|sas|eurl|sasu|\bsa\b|ets /.test(n)?6:0)-i*1.5;
+    c.push([s,l.replace(/^[^A-Za-zÀ-ÿ0-9]+|[^A-Za-zÀ-ÿ0-9.!)]+$/g,'')]);
+  });
+  const w=L.join(' ').match(/www\.([a-z0-9-]+)\./i);
+  if(w)c.push([5,w[1].replace(/^./,x=>x.toUpperCase())]);
+  return c.sort((a,b)=>b[0]-a[0]).map(x=>x[1]).filter((v,i,a)=>v&&a.indexOf(v)===i).slice(0,4);
+}
 function parse(t){
-  const L=t.split('\n').map(l=>l.trim()).filter(Boolean);
-  const num=s=>parseFloat(s.replace(/\s/g,'').replace(',','.'));
-  const re=/\d+[ ]?\d*[.,]\d{2}/g;
-  const out={vendor:(L.find(l=>/[A-Za-zÀ-ÿ]{3,}/.test(l))||'').slice(0,60)};
-  const d=t.match(/(\d{2})[\/.\-](\d{2})[\/.\-](\d{4}|\d{2})\b/);
-  if(d){const y=d[3].length==2?'20'+d[3]:d[3];out.date=`${y}-${d[2]}-${d[1]}`}
-  let c=[];L.filter(l=>/total|ttc|à payer|a payer|montant|net/i.test(l)).forEach(l=>(l.match(re)||[]).forEach(m=>c.push(num(m))));
-  if(!c.length)(t.match(re)||[]).forEach(m=>c.push(num(m)));
-  c=c.filter(x=>x>0&&x<100000);
-  if(c.length)out.amount=Math.max(...c).toFixed(2);
-  return out;
+  const L=t.split('\n').map(s=>s.trim()).filter(s=>s.length>1);
+  const a=pickAmount(L),v=vendors(L),b=brand(L);
+  return {vendor:b||v[0]||'',vendors:b?[b,...v.filter(x=>x!==b)].slice(0,4):v,date:pickDate(L),amount:a.best?a.best.toFixed(2):'',amounts:a.all};
+}
+async function getWorker(){
+  if(!worker){
+    worker=await Tesseract.createWorker('fra',1,{logger:m=>{if(m.status==='recognizing text')$('#status').textContent='Lecture… '+Math.round(m.progress*100)+'%'}});
+    await worker.setParameters({tessedit_pageseg_mode:'4',preserve_interword_spaces:'1'});
+  }
+  return worker;
 }
 $('#file').onchange=async e=>{
   const f=e.target.files[0];if(!f)return;
   blob=await shrink(f);
   $('#preview').src=URL.createObjectURL(blob);$('#preview').style.display='block';
-  $('#status').textContent='Lecture du ticket…';
+  $('#chips').innerHTML='';$('#raw').textContent='';
   try{
-    const r=await Tesseract.recognize(blob,'fra',{logger:m=>{if(m.status==='recognizing text')$('#status').textContent='Lecture… '+Math.round(m.progress*100)+'%'}});
-    const o=parse(r.data.text);
+    $('#status').textContent='Préparation de l’image…';
+    const pre=await prep(f),w=await getWorker();
+    $('#status').textContent='Lecture du ticket…';
+    const r=await w.recognize(pre);let raw=r.data.text;const o=parse(raw);
+    if(!o.vendor||!o.date||!o.amount){
+      $('#status').textContent='Deuxième lecture…';
+      await w.setParameters({tessedit_pageseg_mode:'6'});
+      const r2=await w.recognize(pre);await w.setParameters({tessedit_pageseg_mode:'4'});
+      const o2=parse(r2.data.text);
+      o.vendor=o.vendor||o2.vendor;o.date=o.date||o2.date;o.amount=o.amount||o2.amount;
+      o.vendors=[...new Set([...o.vendors,...o2.vendors])].slice(0,4);o.amounts=[...new Set([...o.amounts,...o2.amounts])].slice(0,6);
+      raw+='\n--- 2e lecture ---\n'+r2.data.text;
+    }
+    $('#raw').textContent=raw;
     if(o.vendor)$('#fVen').value=o.vendor;if(o.date)$('#fDate').value=o.date;if(o.amount)$('#fAmt').value=o.amount;
-    $('#status').textContent='✅ Données lues : vérifiez-les avant d’enregistrer.';
+    lastV=o.vendors;lastA=o.amounts;
+    $('#chips').innerHTML=(lastV.length?'<div>Magasin ? '+lastV.map((v,i)=>`<button class="chip" onclick="$('#fVen').value=lastV[${i}]">${esc(v)}</button>`).join('')+'</div>':'')+
+      (lastA.length?'<div>Montant TTC ? '+lastA.map((a,i)=>`<button class="chip" onclick="$('#fAmt').value=lastA[${i}].toFixed(2)">${eur(a)}</button>`).join('')+'</div>':'');
+    const miss=[!o.vendor&&'magasin',!o.date&&'date',!o.amount&&'montant'].filter(Boolean);
+    $('#status').textContent=miss.length?'⚠️ Non lu : '+miss.join(', ')+'. Complétez à la main (texte lu ci-dessous).':'✅ Lu : vérifiez magasin, date et montant TTC avant d’enregistrer.';
   }catch(err){$('#status').textContent='Lecture impossible, saisissez à la main.'}
 };
 
+// ---------- Enregistrement ----------
 $('#bSave').onclick=async()=>{
+  const loy=$('#fKind').value==='loyer';
   if(!$('#fAmt').value||!$('#fDate').value||!$('#fApt').value){$('#status').textContent='Date, montant et appartement requis.';return}
+  if(loy&&(!$('#fEnd').value||$('#fEnd').value<=$('#fDate').value)){$('#status').textContent='Le départ doit être après l’arrivée.';return}
   $('#bSave').disabled=true;$('#status').textContent='Enregistrement…';
   try{
     let url=null;
-    if(blob){
+    if(blob&&!loy){
       const path=`${user.id}/${crypto.randomUUID()}.jpg`;
       const {error}=await sb.storage.from('receipts').upload(path,blob,{contentType:'image/jpeg'});
       if(error)throw error;
       url=sb.storage.from('receipts').getPublicUrl(path).data.publicUrl;
     }
-    const {error}=await sb.from('expenses').insert({date:$('#fDate').value,vendor:$('#fVen').value,amount:$('#fAmt').value,apartment:$('#fApt').value,kind:$('#fKind').value,category:$('#fKind').value==='loyer'?'Loyer':$('#fCat').value,comment:$('#fCom').value,receipt_url:url});
+    const row={date:$('#fDate').value,vendor:$('#fVen').value,amount:$('#fAmt').value,apartment:$('#fApt').value,kind:$('#fKind').value,category:loy?'Loyer':$('#fCat').value,comment:$('#fCom').value,receipt_url:url};
+    if(loy)row.date_end=$('#fEnd').value;
+    const {error}=await sb.from('expenses').insert(row);
     if(error)throw error;
     $('#status').textContent='✅ Enregistré.';
-    blob=null;$('#preview').style.display='none';$('#file').value='';$('#fVen').value='';$('#fAmt').value='';$('#fCom').value='';
+    blob=null;$('#preview').style.display='none';$('#file').value='';$('#chips').innerHTML='';$('#raw').textContent='';
+    $('#fVen').value='';$('#fAmt').value='';$('#fCom').value='';
+    if(loy){$('#fDate').value=$('#fEnd').value;$('#fEnd').value=addDays($('#fDate').value,1);syncN()}
+    fillYears();
   }catch(e){$('#status').textContent='Erreur : '+e.message}
   $('#bSave').disabled=false;
 };
 
+// ---------- Récap ----------
 async function load(){
   const y=$('#yr').value;
   const {data,error}=await sb.from('expenses').select('*').gte('date',y+'-01-01').lte('date',y+'-12-31').order('date');
   if(error){$('#list').textContent=error.message;return}
-  rows=data;render();
+  rows=data;
+  $('#cnt').textContent=`📷 ${rows.filter(r=>r.receipt_url).length} photo(s) conservée(s) pour ${y}.`;
+  render();
 }
 $('#yr').onchange=load;$('#aptF').onchange=render;
 function groups(){
@@ -291,9 +429,11 @@ function render(){
   if(!Object.keys(g).length)h='<p>Aucune ligne.</p>';
   for(const a in g){
     const L=g[a].filter(r=>r.kind==='loyer'),D=g[a].filter(r=>r.kind!=='loyer');
-    const s=x=>x.reduce((t,r)=>t+Number(r.amount),0);
-    h+=`<h3>${esc(a)}</h3><p>Loyers : <b>${eur(s(L))}</b> · Dépenses : <b>${eur(s(D))}</b> · Résultat : <b>${eur(s(L)-s(D))}</b></p><table><tr><th>Date</th><th>Type</th><th>Libellé</th><th>Catégorie</th><th class="n">Montant</th><th>Commentaire</th><th>Pièce</th><th class="noprint"></th></tr>`;
-    g[a].forEach(r=>{h+=`<tr><td>${r.date}</td><td>${r.kind==='loyer'?'Loyer':'Dépense'}</td><td>${esc(r.vendor)}</td><td>${esc(r.category)}</td><td class="n">${eur(r.amount)}</td><td style="white-space:normal">${esc(r.comment)}</td><td>${r.receipt_url?`<a href="${r.receipt_url}" target="_blank">voir</a>`:''}</td><td class="noprint"><button class="del" style="color:var(--ac);border-color:var(--ac)" onclick="edit('${r.id}')">✏️</button> <button class="del" onclick="del('${r.id}')">✕</button></td></tr>`});
+    const s=x=>x.reduce((t,r)=>t+Number(r.amount),0),N=L.reduce((t,r)=>t+nights(r.date,r.date_end),0);
+    h+=`<h3>${esc(a)}</h3><p>Loyers : <b>${eur(s(L))}</b>${N?` (${N} nuits)`:''} · Dépenses : <b>${eur(s(D))}</b> · Résultat : <b>${eur(s(L)-s(D))}</b></p><table><tr><th>Date</th><th>Type</th><th>Libellé</th><th>Catégorie</th><th class="n">Montant</th><th>Commentaire</th><th>Pièce</th><th class="noprint"></th></tr>`;
+    g[a].forEach(r=>{
+      const l=r.kind==='loyer',n=nights(r.date,r.date_end);
+      h+=`<tr><td>${l&&r.date_end?`${fr(r.date)} → ${fr(r.date_end)} (${n} n.)`:fr(r.date)}</td><td>${l?'Loyer':'Dépense'}</td><td>${esc(r.vendor)}</td><td>${esc(r.category)}</td><td class="n">${eur(r.amount)}</td><td style="white-space:normal">${esc(r.comment)}</td><td>${r.receipt_url?`<a href="${r.receipt_url}" target="_blank">voir</a>`:''}</td><td class="noprint"><button class="del" style="color:var(--ac);border-color:var(--ac)" onclick="edit('${r.id}')">✏️</button> <button class="del" onclick="del('${r.id}')">✕</button></td></tr>`});
     h+='</table>';
   }
   $('#list').innerHTML=h;
@@ -301,24 +441,29 @@ function render(){
 let eid=null;
 function edit(id){
   const r=rows.find(x=>x.id===id);if(!r)return;eid=id;
+  const l=r.kind==='loyer';
   const opt=(arr,v)=>(arr.includes(v)?arr:[...arr,v]).map(x=>`<option${x===v?' selected':''}>${esc(x)}</option>`).join('');
-  $('#eDate').value=r.date;$('#eVen').value=r.vendor||'';$('#eAmt').value=r.amount;$('#eCom').value=r.comment||'';
+  $('#eDate').value=r.date;$('#eEnd').value=r.date_end||'';$('#eVen').value=r.vendor||'';$('#eAmt').value=r.amount;$('#eCom').value=r.comment||'';
+  $('#eDateL').textContent=l?'Arrivée':'Date';
+  $('#eEndBox').classList.toggle('hide',!l);$('#eCatBox').classList.toggle('hide',l);
   $('#eApt').innerHTML=opt(apts(),r.apartment);
   $('#eCat').innerHTML=opt(S.cats,r.category);
-  $('#eCatBox').classList.toggle('hide',r.kind==='loyer');
   $('#eImg').innerHTML=r.receipt_url?`<a href="${r.receipt_url}" target="_blank">Voir la pièce jointe</a>`:'';
   $('#dlg').showModal();
 }
 $('#eSave').onclick=async()=>{
-  const r=rows.find(x=>x.id===eid);
+  const r=rows.find(x=>x.id===eid),l=r.kind==='loyer';
   if(!$('#eDate').value||!$('#eAmt').value)return alert('Date et montant requis.');
-  const {error}=await sb.from('expenses').update({date:$('#eDate').value,vendor:$('#eVen').value,amount:$('#eAmt').value,apartment:$('#eApt').value,category:r.kind==='loyer'?'Loyer':$('#eCat').value,comment:$('#eCom').value}).eq('id',eid);
+  if(l&&(!$('#eEnd').value||$('#eEnd').value<=$('#eDate').value))return alert('Le départ doit être après l’arrivée.');
+  const u={date:$('#eDate').value,vendor:$('#eVen').value,amount:$('#eAmt').value,apartment:$('#eApt').value,category:l?'Loyer':$('#eCat').value,comment:$('#eCom').value};
+  if(l)u.date_end=$('#eEnd').value;
+  const {error}=await sb.from('expenses').update(u).eq('id',eid);
   if(error)return alert(error.message);
   $('#dlg').close();load();
 };
 $('#eCancel').onclick=()=>$('#dlg').close();
 async function del(id){
-  if(!confirm('Supprimer cette dépense ?'))return;
+  if(!confirm('Supprimer cette ligne ?'))return;
   const r=rows.find(x=>x.id===id);
   await sb.from('expenses').delete().eq('id',id);
   if(r&&r.receipt_url){const p=r.receipt_url.split('/receipts/')[1];if(p)await sb.storage.from('receipts').remove([p])}
@@ -327,16 +472,19 @@ async function del(id){
 $('#bPrint').onclick=()=>window.print();
 $('#bCsv').onclick=()=>{
   const g=groups(),q=s=>'"'+String(s??'').replace(/"/g,'""')+'"';
-  let c='Appartement;Type;Date;Libellé;Catégorie;Montant TTC;Commentaire;Justificatif\n';
+  let c='Appartement;Type;Date (arrivée);Date départ;Nuits;Libellé;Catégorie;Montant TTC;Commentaire;Justificatif\n';
   for(const a in g){
     let t=0;
-    g[a].forEach(r=>{t+=(r.kind==='loyer'?1:-1)*Number(r.amount);c+=[q(a),q(r.kind==='loyer'?'Loyer':'Dépense'),r.date,q(r.vendor),q(r.category),String(r.amount).replace('.',','),q(r.comment),q(r.receipt_url)].join(';')+'\n'});
-    c+=[q('RÉSULTAT '+a),'','','','',String(t.toFixed(2)).replace('.',','),'',''].join(';')+'\n\n';
+    g[a].forEach(r=>{const l=r.kind==='loyer';t+=(l?1:-1)*Number(r.amount);
+      c+=[q(a),q(l?'Loyer':'Dépense'),r.date,r.date_end||'',l&&r.date_end?nights(r.date,r.date_end):'',q(r.vendor),q(r.category),String(r.amount).replace('.',','),q(r.comment),q(r.receipt_url)].join(';')+'\n'});
+    c+=[q('RÉSULTAT '+a),'','','','','','',String(t.toFixed(2)).replace('.',','),'',''].join(';')+'\n\n';
   }
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob(['\ufeff'+c],{type:'text/csv;charset=utf-8'}));
   a.download=`notes-de-frais-${$('#yr').value}.csv`;a.click();
 };
+
+// ---------- PDF / archive ----------
 const f2=n=>Number(n||0).toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,' ')+' EUR';
 async function makePdf(save=true){
   const y=$('#yr').value;
@@ -356,14 +504,33 @@ async function makePdf(save=true){
       doc.autoTable(Object.assign({startY:cy+7,head:[head],body,theme:'grid',styles:{fontSize:9},headStyles:{fillColor:[37,99,235]}},opt));
       cy=doc.lastAutoTable.finalY+8;
     };
+    const N=L.reduce((t,r)=>t+nights(r.date,r.date_end),0);
     T('Synthèse',['Poste','Montant'],[['Recettes (loyers encaissés)',f2(sum(L))],['Dépenses (TTC)',f2(sum(D))],['Résultat avant amortissements',f2(sum(L)-sum(D))]]);
-    T('Loyers encaissés',['Date','Locataire / période','Commentaire','Montant'],L.map(r=>[r.date,r.vendor||'',r.comment||'',f2(r.amount)]).concat([['','','TOTAL',f2(sum(L))]]));
+    T('Loyers encaissés',['Arrivée','Départ','Nuits','Locataire','Commentaire','Montant'],L.map(r=>[fr(r.date),fr(r.date_end),r.date_end?nights(r.date,r.date_end):'',r.vendor||'',r.comment||'',f2(r.amount)]).concat([['','',N||'','','TOTAL',f2(sum(L))]]));
     const cats={};D.forEach(r=>cats[r.category||'Autre']=(cats[r.category||'Autre']||0)+Number(r.amount));
     T('Dépenses par catégorie',['Catégorie','Montant'],Object.entries(cats).map(([k,v])=>[k,f2(v)]).concat([['TOTAL',f2(sum(D))]]));
-    T('Détail des dépenses',['Date','Fournisseur','Catégorie','Commentaire','Justificatif','Montant'],D.map(r=>[r.date,r.vendor||'',r.category||'',r.comment||'',r.receipt_url?'Voir la pièce':'-',f2(r.amount)]),{
-      columnStyles:{4:{textColor:[37,99,235]}},
-      didDrawCell:h=>{if(h.section==='body'&&h.column.index===4&&D[h.row.index]&&D[h.row.index].receipt_url)doc.link(h.cell.x,h.cell.y,h.cell.width,h.cell.height,{url:D[h.row.index].receipt_url})}
+    const W=D.filter(r=>r.receipt_url),num={};W.forEach((r,k)=>num[r.id]=k+1);
+    T('Détail des dépenses',['Date','Fournisseur','Catégorie','Commentaire','Justificatif','Montant'],D.map(r=>[fr(r.date),r.vendor||'',r.category||'',r.comment||'',r.receipt_url?'':'-',f2(r.amount)]),{
+      didDrawCell:h=>{
+        if(h.section!=='body'||h.column.index!==4)return;
+        const r=D[h.row.index];if(!r||!r.receipt_url)return;
+        doc.setFontSize(9);doc.setTextColor(37,99,235);
+        doc.textWithLink('Pièce '+num[r.id],h.cell.x+2,h.cell.y+h.cell.height/2+1.2,{url:r.receipt_url});
+        doc.link(h.cell.x,h.cell.y,h.cell.width,h.cell.height,{url:r.receipt_url});
+        doc.setTextColor(0);
+      }
     });
+    if(W.length){
+      if(cy>240){doc.addPage();cy=18}
+      doc.setFontSize(12);doc.setTextColor(0);doc.text('Liens des justificatifs',14,cy+4);cy+=11;
+      doc.setFontSize(7);
+      W.forEach((r,k)=>{
+        if(cy>282){doc.addPage();cy=18}
+        doc.setTextColor(0);doc.text(`${k+1}. ${fr(r.date)} - ${(r.vendor||'').slice(0,30)} - ${f2(r.amount)}`,14,cy);
+        cy+=3.5;doc.setTextColor(37,99,235);doc.textWithLink(r.receipt_url,14,cy,{url:r.receipt_url});cy+=5.5;
+      });
+      doc.setTextColor(0);
+    }
   });
   if(save)doc.save(`dossier-comptable-LMNP-${y}.pdf`);
   return doc;
@@ -393,18 +560,19 @@ $('#bArch').onclick=async()=>{
   st.textContent='Compression…';
   const out=await zip.generateAsync({type:'blob'});
   const a=document.createElement('a');a.href=URL.createObjectURL(out);a.download=`archive-LMNP-${y}.zip`;a.click();
-  st.textContent=`✅ Archive téléchargée : ${imgs.length-fail} photo(s)${fail?`, ${fail} échec(s)`:''}. Ouvrez le ZIP et vérifiez-le avant de libérer l’espace.`;
+  st.textContent=`✅ Archive ${y} téléchargée : ${imgs.length-fail} photo(s)${fail?`, ${fail} échec(s)`:''}. Ouvrez le ZIP et vérifiez-le avant de libérer l’espace.`;
 };
 $('#bFree').onclick=async()=>{
   const y=$('#yr').value,[d1,d2]=yr();
   const {data,error}=await sb.from('expenses').select('id,receipt_url').gte('date',d1).lte('date',d2).not('receipt_url','is',null);
   if(error)return alert(error.message);
   if(!data.length)return alert('Aucune photo en '+y);
-  if(prompt(`Supprimer définitivement ${data.length} photo(s) de ${y} de Supabase ?\nÀ ne faire qu’APRÈS avoir téléchargé et vérifié l’archive ZIP.\nTapez SUPPRIMER pour confirmer.`)!=='SUPPRIMER')return;
+  const cur=+y===new Date().getFullYear()?'\n⚠️ C’est l’année EN COURS.':'';
+  if(prompt(`Supprimer définitivement ${data.length} photo(s) de ${y} de Supabase ?${cur}\nÀ ne faire qu’APRÈS avoir téléchargé et vérifié l’archive ZIP de ${y}.\nTapez SUPPRIMER pour confirmer.`)!=='SUPPRIMER')return;
   const paths=data.map(r=>r.receipt_url.split('/receipts/')[1]).filter(Boolean);
   for(let i=0;i<paths.length;i+=100){const {error}=await sb.storage.from('receipts').remove(paths.slice(i,i+100));if(error)return alert(error.message)}
   await sb.from('expenses').update({receipt_url:null}).in('id',data.map(r=>r.id));
-  $('#arSt').textContent=`✅ ${paths.length} photo(s) supprimée(s) de Supabase.`;load();
+  $('#arSt').textContent=`✅ ${paths.length} photo(s) de ${y} supprimée(s) de Supabase.`;load();
 };
 init();
 </script>
