@@ -66,7 +66,10 @@ Table déjà créée avant cette version ? Lancez : <code>alter table expenses a
     <div id="status"></div>
     <div class="row"><div><label id="dateL">Date</label><input id="fDate" type="date"></div>
     <div id="endBox" class="hide"><label>Départ</label><input id="fEnd" type="date"></div></div>
-    <div id="nightBox" class="row hide"><div><label>Nombre de nuits</label><input id="fNights" type="number" min="1" inputmode="numeric"></div><div><label>Prix par nuit</label><input id="fPpn" disabled></div></div>
+    <div id="nightBox" class="row hide">
+      <div><label>Nombre de nuits</label><input id="fNights" type="number" min="1" step="1" inputmode="numeric"></div>
+      <div><label>Loyer journalier / nuit (€)</label><input id="fPpn" type="number" min="0" step="0.01" inputmode="decimal" placeholder="ex. 95.00"></div>
+    </div>
     <label id="amtL">Montant TTC (€)</label><input id="fAmt" type="number" step="0.01" inputmode="decimal">
     <label id="venL">Fournisseur</label><input id="fVen">
     <div class="row"><div><label>Appartement</label><select id="fApt"></select></div>
@@ -106,6 +109,17 @@ Table déjà créée avant cette version ? Lancez : <code>alter table expenses a
   <div class="row"><button id="eSave">Enregistrer</button><button id="eCancel" class="sec">Annuler</button></div>
 </dialog>
 
+<dialog id="freeDlg">
+  <b>Supprimer les photos de l’année</b>
+  <p id="freeMsg" style="font-size:14px;margin:10px 0"></p>
+  <label>Tapez <b>SUPPRIMER</b> pour confirmer</label>
+  <input id="freeInput" autocomplete="off" placeholder="SUPPRIMER">
+  <div class="row">
+    <button id="freeConfirm" style="background:var(--ko)">Confirmer la suppression</button>
+    <button id="freeCancel" class="sec">Annuler</button>
+  </div>
+</dialog>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
@@ -128,6 +142,20 @@ const addDays=(s,n)=>{const d=dd(s);d.setDate(d.getDate()+n);return iso(d)};
 const nights=(a,b)=>a&&b?Math.max(0,Math.round((dd(b)-dd(a))/864e5)):0;
 const fr=s=>s?s.split('-').reverse().join('/'):'';
 const safeUrl=u=>u?encodeURI(String(u).trim()):'';
+const round2=n=>Math.round((Number(n)+Number.EPSILON)*100)/100;
+
+function extractStoragePath(url){
+  if(!url)return '';
+  try{
+    const pathname=decodeURIComponent(new URL(url).pathname);
+    const idx=pathname.indexOf('/receipts/');
+    return idx>=0?pathname.slice(idx+'/receipts/'.length):'';
+  }catch(e){
+    const raw=String(url).split('?')[0];
+    const parts=raw.split('/receipts/');
+    return parts[1]?decodeURIComponent(parts[1]):'';
+  }
+}
 
 async function init(){
   const c=cfg();
@@ -174,28 +202,59 @@ function tab(n){
 }
 $('#t1').onclick=()=>tab(1);$('#t2').onclick=()=>tab(2);$('#t3').onclick=()=>tab(3);
 
+// ---------- Loyer : arrivée / départ / nuits / loyer journalier ----------
 function syncN(from){
+  if($('#fKind').value!=='loyer')return;
   const a=$('#fDate').value;
-  if(from==='n'){const n=parseInt($('#fNights').value)||0;if(a&&n>0)$('#fEnd').value=addDays(a,n)}
-  else $('#fNights').value=nights(a,$('#fEnd').value)||'';
-  const n=parseInt($('#fNights').value)||0,m=parseFloat($('#fAmt').value)||0;
-  $('#fPpn').value=n&&m?eur(m/n):'';
+  if(from==='n'){
+    const n=parseInt($('#fNights').value,10)||0;
+    if(a&&n>0)$('#fEnd').value=addDays(a,n);
+  }else if(from==='date'||from==='end'){
+    const computed=nights(a,$('#fEnd').value);
+    $('#fNights').value=computed>0?computed:'';
+  }
+  const n=parseInt($('#fNights').value,10)||0;
+  const ppnRaw=parseFloat($('#fPpn').value);
+  const amtRaw=parseFloat($('#fAmt').value);
+
+  if(from==='ppn'){
+    if(n>0&&!Number.isNaN(ppnRaw)&&ppnRaw>=0){
+      $('#fAmt').value=round2(n*ppnRaw).toFixed(2);
+    }
+  }else if(from==='amt'){
+    if(n>0&&!Number.isNaN(amtRaw)&&amtRaw>=0){
+      $('#fPpn').value=round2(amtRaw/n).toFixed(2);
+    }
+  }else if(from==='n'||from==='date'||from==='end'){
+    if(n>0&&!Number.isNaN(ppnRaw)&&ppnRaw>0){
+      $('#fAmt').value=round2(n*ppnRaw).toFixed(2);
+    }else if(n>0&&!Number.isNaN(amtRaw)&&amtRaw>0){
+      $('#fPpn').value=round2(amtRaw/n).toFixed(2);
+    }
+  }
 }
 $('#fDate').onchange=()=>{
   if($('#fKind').value!=='loyer')return;
   const e=$('#fEnd').value;
   if(!e||e<=$('#fDate').value)$('#fEnd').value=addDays($('#fDate').value,1);
-  syncN();
+  syncN('date');
 };
-$('#fEnd').onchange=()=>syncN();$('#fNights').oninput=()=>syncN('n');$('#fAmt').oninput=()=>syncN();
+$('#fEnd').onchange=()=>syncN('end');
+$('#fNights').oninput=()=>syncN('n');
+$('#fPpn').oninput=()=>syncN('ppn');
+$('#fAmt').oninput=()=>syncN('amt');
 $('#fKind').onchange=()=>{
   const l=$('#fKind').value==='loyer';
   ['photoBox','catBox'].forEach(i=>$('#'+i).classList.toggle('hide',l));
   ['endBox','nightBox'].forEach(i=>$('#'+i).classList.toggle('hide',!l));
   $('#venL').textContent=l?'Locataire (ex. Dupont)':'Fournisseur';
   $('#dateL').textContent=l?'Arrivée':'Date';
-  $('#amtL').textContent=l?'Loyer encaissé pour le séjour (€)':'Montant TTC (€)';
-  if(l){blob=null;$('#file').value='';$('#preview').style.display='none';if(!$('#fEnd').value)$('#fEnd').value=addDays($('#fDate').value||today(),1);syncN()}
+  $('#amtL').textContent=l?'Loyer total du séjour (€)':'Montant TTC (€)';
+  if(l){
+    blob=null;$('#file').value='';$('#preview').style.display='none';
+    if(!$('#fEnd').value)$('#fEnd').value=addDays($('#fDate').value||today(),1);
+    syncN('end');
+  }
 };
 
 function loadS(){
@@ -247,7 +306,7 @@ $('#fCat').onchange=()=>{if($('#fCat').value==='__new__')addCat()};
 async function shrink(file){
   const bmp=await createImageBitmap(file,{imageOrientation:'from-image'});
   const k=Math.min(1,1600/Math.max(bmp.width,bmp.height));
-  const c=document.createElement('canvas');c.width=Math.round(bmp.width*k);c.height=Math.round(bmp.height*k);
+  const c=document.createElement('canvas');c.width=Math.max(1,Math.round(bmp.width*k));c.height=Math.max(1,Math.round(bmp.height*k));
   c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);bmp.close();
   return new Promise(res=>c.toBlob(b=>res(b),'image/jpeg',.82));
 }
@@ -267,14 +326,14 @@ async function prep(file){
   return new Promise(res=>c.toBlob(b=>res(b),'image/png'));
 }
 
-const norm=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+const norm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
 const key=s=>norm(s).replace(/[^a-z0-9]/g,'');
 const BRANDS=['Leroy Merlin','Castorama','Brico Dépôt','Bricomarché','Mr Bricolage','Weldom','Bricorama','Point P','IKEA','Conforama','Maisons du Monde','Gifi','Action','La Foir’Fouille','Carrefour','Leclerc','Auchan','Intermarché','Lidl','Monoprix','Super U','Franprix','Picard','Amazon','Cdiscount','Darty','Boulanger','Fnac','Decathlon','Kiabi','Orange','SFR','Bouygues','EDF','Engie','TotalEnergies','Veolia','La Poste','Axa','Allianz','MAIF','Groupama','Booking','Airbnb','Cedeo','Tollens','Lapeyre','Alinea','Cuisinella','Vert Baudet','Hornbach'];
-const MOIS={janv:1,jan:1,fevr:2,fev:2,mars:3,mar:3,avr:4,avril:4,mai:5,juin:6,juil:7,aout:8,sept:9,sep:9,oct:10,nov:11,dec:12};
+const MOIS={janv:1,jan:1,janvier:1,fevr:2,fev:2,fevrier:2,mars:3,mar:3,avr:4,avril:4,mai:5,juin:6,juil:7,juillet:7,aout:8,sept:9,sep:9,septembre:9,oct:10,octobre:10,nov:11,novembre:11,dec:12,decembre:12};
 function lev(a,b){const m=[];for(let i=0;i<=a.length;i++)m[i]=[i];for(let j=1;j<=b.length;j++)m[0][j]=j;
   for(let i=1;i<=a.length;i++)for(let j=1;j<=b.length;j++)m[i][j]=Math.min(m[i-1][j]+1,m[i][j-1]+1,m[i-1][j-1]+(a[i-1]===b[j-1]?0:1));return m[a.length][b.length]}
 function amounts(line){
-  const t=line.replace(/\d{1,2}\s?[\/.\-]\s?\d{1,2}\s?[\/.\-]\s?\d{2,4}/g,' ').replace(/\d+[,.]?\d*\s?%/g,' ')
+  const t=String(line||'').replace(/\d{1,2}\s?[\/.\-]\s?\d{1,2}\s?[\/.\-]\s?\d{2,4}/g,' ').replace(/\d+[,.]?\d*\s?%/g,' ')
     .replace(/(\d)[oO](?=\d)/g,(m,a)=>a+'0').replace(/(\d)[lI|](?=\d)/g,(m,a)=>a+'1');
   const re=/(\d{1,3}(?:[ .]\d{3})+|\d+)\s?[,.]\s?(\d{2})(?!\d)/g,out=[];let m;
   while((m=re.exec(t)))out.push(parseFloat(m[1].replace(/[ .]/g,'')+'.'+m[2]));
@@ -300,7 +359,10 @@ function pickAmount(L){
   return {best,all:all.slice(0,6)};
 }
 function fixDateOcr(s){
-  return norm(s).replace(/([0-9])[oOlI](?=[0-9\/.\-])/g,'$10').replace(/(?<=[\/.\-])[oOlI]([0-9])/g,'0$1');
+  return norm(s)
+    .replace(/([0-9])[oOlI](?=[0-9\/.\-])/g,'$10')
+    .replace(/([\/.\-])[oOlI]([0-9])/g,'$10$2')
+    .replace(/([\/.\-][0-9]{1,2}[\/.\-])[oOlI]([0-9])/g,'$10$2');
 }
 function pickDate(L){
   const maxY=new Date().getFullYear()+1,c=[];
@@ -313,13 +375,13 @@ function pickDate(L){
     while((m=r1.exec(t))){const d=ok(m[1],m[2],m[3]);if(d)c.push([sc,d])}
     const r2=/(\d{4})[\/.\-](\d{2})[\/.\-](\d{2})/g;
     while((m=r2.exec(t))){const d=ok(m[3],m[2],m[1]);if(d)c.push([sc,d])}
-    const r3=/(\d{1,2})\s+(janv|jan|fevr|fev|mars|mar|avril|avr|mai|juin|juil|aout|sept|sep|oct|nov|dec)[a-z.]*\s+(\d{4}|\d{2})/g;
+    const r3=/(\d{1,2})\s+(janv|jan|janvier|fevr|fev|fevrier|mars|mar|avr|avril|mai|juin|juil|juillet|aout|sept|sep|septembre|oct|octobre|nov|novembre|dec|decembre)[a-z.]*\s+(\d{4}|\d{2})/g;
     while((m=r3.exec(t))){const d=ok(m[1],MOIS[m[2]],m[3]);if(d)c.push([sc,d])}
   });
   c.sort((a,b)=>b[0]-a[0]);return c.length?c[0][1]:'';
 }
 function brand(L){
-  const top=L.slice(0,14).map(key);
+  const top=L.slice(0,15).map(key);
   for(const l of top)for(const B of BRANDS){const k=key(B);if(k.length>=4&&l.includes(k))return B}
   for(const B of BRANDS){const k=key(B),tol=k.length>8?2:1;if(k.length<5)continue;
     for(const l of top)for(let i=0;i+k.length<=l.length;i++)if(lev(k,l.substr(i,k.length))<=tol)return B}
@@ -328,11 +390,11 @@ function brand(L){
   return '';
 }
 function vendors(L){
-  const J=/\b(ticket|facture|caisse|client|tel|siret|siren|tva|cedex|merci|bienvenue|date|code|total|montant|eur)\b|www|http|@|\brue\b|avenue|boulevard|n°|\d{5}/;
+  const J=/\b(ticket|facture|caisse|client|tel|siret|siren|tva|cedex|merci|bienvenue|date|code|total|montant|eur|rcs|naf|ape)\b|www|http|@|\brue\b|avenue|boulevard|n°|\d{5}/;
   const c=[];
-  L.slice(0,12).forEach((l,i)=>{
+  L.slice(0,14).forEach((l,i)=>{
     const n=norm(l),lt=(l.match(/[A-Za-zÀ-ÿ]/g)||[]).length;
-    if(lt<3||lt/l.length<.5||l.length>45||J.test(n))return;
+    if(lt<3||lt/l.length<.45||l.length>50||J.test(n))return;
     const up=(l.match(/[A-ZÀ-Ý]/g)||[]).length/lt;
     const s=lt+(up>.7?8:0)+(/sarl|sas|eurl|sasu|\bsa\b|ets /.test(n)?6:0)-i*1.5;
     c.push([s,l.replace(/^[^A-Za-zÀ-ÿ0-9]+|[^A-Za-zÀ-ÿ0-9.!)]+$/g,'')]);
@@ -342,7 +404,7 @@ function vendors(L){
   return c.sort((a,b)=>b[0]-a[0]).map(x=>x[1]).filter((v,i,a)=>v&&a.indexOf(v)===i).slice(0,4);
 }
 function parse(t){
-  const L=t.split('\n').map(s=>s.trim()).filter(s=>s.length>1);
+  const L=String(t||'').split('\n').map(s=>s.trim()).filter(s=>s.length>1);
   const a=pickAmount(L),v=vendors(L),b=brand(L);
   return {vendor:b||v[0]||'',vendors:b?[b,...v.filter(x=>x!==b)].slice(0,4):v,date:pickDate(L),amount:a.best?a.best.toFixed(2):'',amounts:a.all};
 }
@@ -373,10 +435,12 @@ $('#file').onchange=async e=>{
       raw+='\n--- 2e lecture ---\n'+r2.data.text;
     }
     $('#raw').textContent=raw;
-    if(o.vendor)$('#fVen').value=o.vendor;if(o.date)$('#fDate').value=o.date;if(o.amount)$('#fAmt').value=o.amount;
+    if(o.vendor)$('#fVen').value=o.vendor;
+    if(o.date)$('#fDate').value=o.date;
+    if(o.amount)$('#fAmt').value=o.amount;
     lastV=o.vendors;lastA=o.amounts;
-    $('#chips').innerHTML=(lastV.length?'<div>Magasin ? '+lastV.map((v,i)=>`<button class="chip" onclick="$('#fVen').value=lastV[${i}]">${esc(v)}</button>`).join('')+'</div>':'')+
-      (lastA.length?'<div>Montant TTC ? '+lastA.map((a,i)=>`<button class="chip" onclick="$('#fAmt').value=lastA[${i}].toFixed(2)">${eur(a)}</button>`).join('')+'</div>':'');
+    $('#chips').innerHTML=(lastV.length?'<div>Magasin ? '+lastV.map((v,i)=>`<button class="chip" type="button" onclick="$('#fVen').value=lastV[${i}]">${esc(v)}</button>`).join('')+'</div>':'')+
+      (lastA.length?'<div>Montant TTC ? '+lastA.map((a,i)=>`<button class="chip" type="button" onclick="$('#fAmt').value=lastA[${i}].toFixed(2)">${eur(a)}</button>`).join('')+'</div>':'');
     const miss=[!o.vendor&&'magasin',!o.date&&'date',!o.amount&&'montant'].filter(Boolean);
     $('#status').textContent=miss.length?'⚠️ Non lu : '+miss.join(', ')+'. Complétez à la main (texte lu ci-dessous).':'✅ Lu : vérifiez magasin, date et montant TTC avant d’enregistrer.';
   }catch(err){$('#status').textContent='Lecture impossible, saisissez à la main.'}
@@ -395,14 +459,14 @@ $('#bSave').onclick=async()=>{
       if(error)throw error;
       url=sb.storage.from('receipts').getPublicUrl(path).data.publicUrl;
     }
-    const row={date:$('#fDate').value,vendor:$('#fVen').value,amount:$('#fAmt').value,apartment:$('#fApt').value,kind:$('#fKind').value,category:loy?'Loyer':$('#fCat').value,comment:$('#fCom').value,receipt_url:url};
+    const row={date:$('#fDate').value,vendor:$('#fVen').value,amount:round2($('#fAmt').value),apartment:$('#fApt').value,kind:$('#fKind').value,category:loy?'Loyer':$('#fCat').value,comment:$('#fCom').value,receipt_url:url};
     if(loy)row.date_end=$('#fEnd').value;
     const {error}=await sb.from('expenses').insert(row);
     if(error)throw error;
     $('#status').textContent='✅ Enregistré.';
     blob=null;$('#preview').style.display='none';$('#file').value='';$('#chips').innerHTML='';$('#raw').textContent='';
-    $('#fVen').value='';$('#fAmt').value='';$('#fCom').value='';
-    if(loy){$('#fDate').value=$('#fEnd').value;$('#fEnd').value=addDays($('#fDate').value,1);syncN()}
+    $('#fVen').value='';$('#fAmt').value='';$('#fCom').value='';$('#fPpn').value='';
+    if(loy){$('#fDate').value=$('#fEnd').value;$('#fEnd').value=addDays($('#fDate').value,1);syncN('end')}
     fillYears();
   }catch(e){$('#status').textContent='Erreur : '+e.message}
   $('#bSave').disabled=false;
@@ -412,7 +476,7 @@ async function load(){
   const y=$('#yr').value;
   const {data,error}=await sb.from('expenses').select('*').gte('date',y+'-01-01').lte('date',y+'-12-31').order('date');
   if(error){$('#list').textContent=error.message;return}
-  rows=data;
+  rows=data||[];
   $('#cnt').textContent=`📷 ${rows.filter(r=>r.receipt_url).length} photo(s) conservée(s) pour ${y}.`;
   render();
 }
@@ -453,7 +517,7 @@ $('#eSave').onclick=async()=>{
   const r=rows.find(x=>x.id===eid),l=r.kind==='loyer';
   if(!$('#eDate').value||!$('#eAmt').value)return alert('Date et montant requis.');
   if(l&&(!$('#eEnd').value||$('#eEnd').value<=$('#eDate').value))return alert('Le départ doit être après l’arrivée.');
-  const u={date:$('#eDate').value,vendor:$('#eVen').value,amount:$('#eAmt').value,apartment:$('#eApt').value,category:l?'Loyer':$('#eCat').value,comment:$('#eCom').value};
+  const u={date:$('#eDate').value,vendor:$('#eVen').value,amount:round2($('#eAmt').value),apartment:$('#eApt').value,category:l?'Loyer':$('#eCat').value,comment:$('#eCom').value};
   if(l)u.date_end=$('#eEnd').value;
   const {error}=await sb.from('expenses').update(u).eq('id',eid);
   if(error)return alert(error.message);
@@ -463,8 +527,9 @@ $('#eCancel').onclick=()=>$('#dlg').close();
 async function del(id){
   if(!confirm('Supprimer cette ligne ?'))return;
   const r=rows.find(x=>x.id===id);
-  await sb.from('expenses').delete().eq('id',id);
-  if(r&&r.receipt_url){const p=r.receipt_url.split('/receipts/')[1];if(p)await sb.storage.from('receipts').remove([p])}
+  const {error}=await sb.from('expenses').delete().eq('id',id);
+  if(error)return alert(error.message);
+  if(r&&r.receipt_url){const p=extractStoragePath(r.receipt_url);if(p)await sb.storage.from('receipts').remove([p])}
   load();
 }
 $('#bPrint').onclick=()=>window.print();
@@ -559,17 +624,44 @@ $('#bArch').onclick=async()=>{
   const a=document.createElement('a');a.href=URL.createObjectURL(out);a.download=`archive-LMNP-${y}.zip`;a.click();
   st.textContent=`✅ Archive ${y} téléchargée : ${imgs.length-fail} photo(s)${fail?`, ${fail} échec(s)`:''}. Ouvrez le ZIP et vérifiez-le avant de libérer l’espace.`;
 };
+
+let pendingFree=null;
 $('#bFree').onclick=async()=>{
   const y=$('#yr').value,[d1,d2]=yr();
   const {data,error}=await sb.from('expenses').select('id,receipt_url').gte('date',d1).lte('date',d2).not('receipt_url','is',null);
-  if(error)return alert(error.message);
-  if(!data.length)return alert('Aucune photo en '+y);
-  const cur=+y===new Date().getFullYear()?'\n⚠️ C’est l’année EN COURS.':'';
-  if(prompt(`Supprimer définitivement ${data.length} photo(s) de ${y} de Supabase ?${cur}\nÀ ne faire qu’APRÈS avoir téléchargé et vérifié l’archive ZIP de ${y}.\nTapez SUPPRIMER pour confirmer.`)!=='SUPPRIMER')return;
-  const paths=data.map(r=>r.receipt_url.split('/receipts/')[1]).filter(Boolean);
-  for(let i=0;i<paths.length;i+=100){const {error}=await sb.storage.from('receipts').remove(paths.slice(i,i+100));if(error)return alert(error.message)}
-  await sb.from('expenses').update({receipt_url:null}).in('id',data.map(r=>r.id));
-  $('#arSt').textContent=`✅ ${paths.length} photo(s) de ${y} supprimée(s) de Supabase.`;load();
+  if(error)return alert('Erreur lecture : '+error.message);
+  if(!data||!data.length)return alert('Aucune photo en '+y);
+  pendingFree={y,items:data};
+  const cur=+y===new Date().getFullYear()?' ⚠️ Attention : c’est l’année EN COURS.':'';
+  $('#freeMsg').textContent=`Supprimer définitivement ${data.length} photo(s) de ${y} sur Supabase ?${cur} À faire uniquement APRÈS avoir vérifié l’archive ZIP.`;
+  $('#freeInput').value='';
+  $('#freeDlg').showModal();
+};
+$('#freeCancel').onclick=()=>{pendingFree=null;$('#freeDlg').close();};
+$('#freeConfirm').onclick=async()=>{
+  if(!pendingFree)return;
+  const val=$('#freeInput').value.trim().toUpperCase();
+  if(val!=='SUPPRIMER')return alert('Tapez SUPPRIMER pour confirmer.');
+  const {y,items}=pendingFree;
+  $('#freeConfirm').disabled=true;
+  try{
+    const paths=items.map(r=>extractStoragePath(r.receipt_url)).filter(Boolean);
+    for(let i=0;i<paths.length;i+=100){
+      const batch=paths.slice(i,i+100);
+      const {error}=await sb.storage.from('receipts').remove(batch);
+      if(error)throw new Error('Storage : '+error.message);
+    }
+    const {error:dbErr}=await sb.from('expenses').update({receipt_url:null}).in('id',items.map(r=>r.id));
+    if(dbErr)throw new Error('Base : '+dbErr.message);
+    $('#freeDlg').close();
+    pendingFree=null;
+    $('#arSt').textContent=`✅ ${paths.length} photo(s) de ${y} supprimée(s) de Supabase.`;
+    await load();
+  }catch(e){
+    alert('Échec de suppression : '+e.message);
+  }finally{
+    $('#freeConfirm').disabled=false;
+  }
 };
 init();
 </script>
