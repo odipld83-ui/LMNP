@@ -16,6 +16,7 @@ input,select,textarea,button{font:inherit;width:100%;padding:10px;border-radius:
 button{background:var(--ac);color:#fff;border:0;cursor:pointer;font-weight:600;margin-top:10px}
 button.sec{background:transparent;color:var(--ac);border:1px solid var(--ac)}
 button.del{width:auto;padding:4px 8px;margin:0;background:transparent;color:var(--ko);border:1px solid var(--ko);font-size:12px}
+button.ed{width:auto;padding:4px 8px;margin:0 4px 0 0;background:transparent;color:var(--ac);border:1px solid var(--ac);font-size:12px}
 button.chip{width:auto;padding:4px 10px;margin:4px 4px 0 0;background:transparent;color:var(--ac);border:1px solid var(--ac);border-radius:16px;font-size:13px;font-weight:500}
 .row{display:flex;gap:8px}.row>*{flex:1}
 .tabs{display:flex;gap:8px;margin-bottom:12px}.tabs button{margin:0;background:var(--card);color:var(--tx);border:1px solid var(--bd)}.tabs button.on{background:var(--ac);color:#fff}
@@ -87,11 +88,18 @@ Table déjà créée avant cette version ? Lancez : <code>alter table expenses a
   </div>
 
   <div id="p2" class="card hide">
-    <div class="row noprint"><div><label>Année (affichage, PDF, archivage)</label><select id="yr"></select></div><div><label>Appartement</label><select id="aptF"></select></div></div>
+    <div class="row noprint">
+      <div><label>Année</label><select id="yr"></select></div>
+      <div><label>Filtre affichage</label><select id="aptF"></select></div>
+    </div>
+    <div class="noprint">
+      <label>Appartement pour téléchargement (PDF / ZIP)</label>
+      <select id="pdfApt"></select>
+    </div>
     <div id="cnt" class="noprint"></div>
     <div class="row noprint"><button id="bCsv">⬇️ Export CSV</button><button id="bPrint" class="sec">🖨️ Imprimer</button></div>
-    <button id="bPdf" class="noprint">📄 Dossier comptable PDF (tous les appartements)</button>
-    <button id="bArch" class="sec noprint">🗄️ Archiver l’année choisie (ZIP photos + PDF)</button>
+    <button id="bPdf" class="noprint">📄 Télécharger le PDF (appartement sélectionné)</button>
+    <button id="bArch" class="sec noprint">🗄️ Télécharger l’archive ZIP (photos + PDF)</button>
     <button id="bFree" class="sec noprint" style="color:var(--ko);border-color:var(--ko)">🧹 Libérer l’espace : supprimer les photos de l’année choisie</button>
     <div id="arSt" class="noprint"></div>
     <div id="list" class="tw" style="margin-top:12px"></div>
@@ -202,7 +210,6 @@ function tab(n){
 }
 $('#t1').onclick=()=>tab(1);$('#t2').onclick=()=>tab(2);$('#t3').onclick=()=>tab(3);
 
-// ---------- Loyer : arrivée / départ / nuits / loyer journalier ----------
 function syncN(from){
   if($('#fKind').value!=='loyer')return;
   const a=$('#fDate').value;
@@ -267,12 +274,16 @@ async function persist(){
   if(error)alert(error.message);else user=data.user;
 }
 function fillSel(){
-  const kA=$('#fApt').value,kC=$('#fCat').value,o=a=>`<option>${esc(a)}</option>`;
+  const kA=$('#fApt').value,kC=$('#fCat').value,kF=$('#aptF').value,kP=$('#pdfApt').value;
+  const o=a=>`<option>${esc(a)}</option>`;
   $('#fApt').innerHTML='<option value="">Choisir…</option>'+S.apts.map(a=>o(a.name)).join('')+'<option value="__new__">➕ Nouvel appartement…</option>';
   $('#aptF').innerHTML='<option value="">Tous les appartements</option>'+S.apts.map(a=>o(a.name)).join('');
+  $('#pdfApt').innerHTML='<option value="__all__">Tous les appartements</option>'+S.apts.map(a=>o(a.name)).join('');
   $('#fCat').innerHTML=S.cats.map(o).join('')+'<option value="__new__">➕ Nouvelle catégorie…</option>';
   if(kA&&kA!=='__new__')$('#fApt').value=kA;
   if(kC&&kC!=='__new__')$('#fCat').value=kC;
+  if(kF&&S.apts.some(a=>a.name===kF))$('#aptF').value=kF;
+  if(kP&&S.apts.some(a=>a.name===kP))$('#pdfApt').value=kP;
 }
 function renderSet(){
   $('#aptSet').innerHTML=S.apts.map((a,i)=>`<div class="card" style="margin-top:8px"><label>Nom</label><input id="an${i}" value="${esc(a.name)}"><label>Adresse</label><input id="ad${i}" value="${esc(a.addr)}"><div class="row"><button onclick="saveApt(${i})">Enregistrer</button><button class="sec" onclick="delApt(${i})">Retirer</button></div></div>`).join('')||'<p>Aucun appartement.</p>';
@@ -312,14 +323,14 @@ async function shrink(file){
 }
 async function prep(file){
   const bmp=await createImageBitmap(file,{imageOrientation:'from-image'});
-  const k=Math.min(2,2000/Math.max(bmp.width,bmp.height));
+  const k=Math.min(2.2,2200/Math.max(bmp.width,bmp.height));
   const c=document.createElement('canvas');c.width=Math.max(1,Math.round(bmp.width*k));c.height=Math.max(1,Math.round(bmp.height*k));
   const x=c.getContext('2d');x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';
   x.drawImage(bmp,0,0,c.width,c.height);bmp.close();
   const img=x.getImageData(0,0,c.width,c.height),p=img.data;
   for(let i=0;i<p.length;i+=4){
     const g=p[i]*.299+p[i+1]*.587+p[i+2]*.114;
-    const v=Math.max(0,Math.min(255,(g-128)*1.25+128));
+    const v=Math.max(0,Math.min(255,(g-128)*1.2+128));
     p[i]=p[i+1]=p[i+2]=v;
   }
   x.putImageData(img,0,0);
@@ -332,17 +343,29 @@ const BRANDS=['Leroy Merlin','Castorama','Brico Dépôt','Bricomarché','Mr Bric
 const MOIS={janv:1,jan:1,janvier:1,fevr:2,fev:2,fevrier:2,mars:3,mar:3,avr:4,avril:4,mai:5,juin:6,juil:7,juillet:7,aout:8,sept:9,sep:9,septembre:9,oct:10,octobre:10,nov:11,novembre:11,dec:12,decembre:12};
 function lev(a,b){const m=[];for(let i=0;i<=a.length;i++)m[i]=[i];for(let j=1;j<=b.length;j++)m[0][j]=j;
   for(let i=1;i<=a.length;i++)for(let j=1;j<=b.length;j++)m[i][j]=Math.min(m[i-1][j]+1,m[i][j-1]+1,m[i-1][j-1]+(a[i-1]===b[j-1]?0:1));return m[a.length][b.length]}
+
+function fixNumOcr(s){
+  return String(s||'')
+    .replace(/([0-9])[oO](?=[0-9\/.\-\s])/g,'$10')
+    .replace(/(^|[\s\/.\-])([oO])(?=[0-9])/g,'$10')
+    .replace(/([0-9\/.\-])[lI|](?=[0-9\/.\-])/g,'$11');
+}
+
 function amounts(line){
-  const t=String(line||'').replace(/\d{1,2}\s?[\/.\-]\s?\d{1,2}\s?[\/.\-]\s?\d{2,4}/g,' ').replace(/\d+[,.]?\d*\s?%/g,' ')
-    .replace(/(\d)[oO](?=\d)/g,(m,a)=>a+'0').replace(/(\d)[lI|](?=\d)/g,(m,a)=>a+'1');
+  const cleaned=fixNumOcr(line)
+    .replace(/\d{1,2}\s?[\/.\-]\s?\d{1,2}\s?[\/.\-]\s?\d{2,4}(?:\s+\d{1,2}[:h]\d{2})?/g,' ')
+    .replace(/\d+[,.]?\d*\s?%/g,' ')
+    .replace(/\b(?:siret|siren|tva\s*intra|iban|bic|tel)\b[:.\s]*[a-z0-9\s]+/gi,' ');
   const re=/(\d{1,3}(?:[ .]\d{3})+|\d+)\s?[,.]\s?(\d{2})(?!\d)/g,out=[];let m;
-  while((m=re.exec(t)))out.push(parseFloat(m[1].replace(/[ .]/g,'')+'.'+m[2]));
+  while((m=re.exec(cleaned)))out.push(parseFloat(m[1].replace(/[ .]/g,'')+'.'+m[2]));
   return out.filter(v=>v>0&&v<100000);
 }
+
 function pickAmount(L){
-  const T1=/net a payer|total ttc|montant ttc|total a payer|a regler|reste a payer|total general|net ttc|ttc a payer|total t\.?t\.?c/;
-  const T2=/total|montant|somme/,T3=/carte|\bcb\b|visa|mastercard|especes|paiement|reglement|cheque|virement/;
-  const BAD=/\bht\b|h\.t|hors taxe|tva|t\.v\.a|base|remise|rendu|monnaie|sous.?total|economie|fidelite|point|acompte|taxe|recu/;
+  const T1=/net a payer|total ttc|montant ttc|total a payer|a regler|reste a payer|total general|net ttc|ttc a payer|total t\.?t\.?c|somme due|montant du/;
+  const T2=/\btotal\b|\bmontant\b|\bsomme\b/;
+  const T3=/\bcb\b|carte bancaire|visa|mastercard|especes|paiement|reglement|cheque|virement/;
+  const BAD=/\bht\b|h\.t|hors taxe|\btva\b|t\.v\.a|base|remise|rendu|monnaie|sous.?total|economie|fidelite|point|acompte|taxe|recu|solde/;
   const get=i=>{let v=amounts(L[i]);if(!v.length&&L[i+1])v=amounts(L[i+1]);return v};
   const tier=(re,bad)=>{const c=[];L.forEach((l,i)=>{const n=norm(l);if(re.test(n)&&(bad||!BAD.test(n)))c.push(...get(i))});return c};
   let best=0,c=tier(T1,true);
@@ -350,7 +373,7 @@ function pickAmount(L){
   if(!c.length)c=tier(T3,false);
   if(c.length)best=Math.max(...c);
   const ht=[],tv=[];
-  L.forEach((l,i)=>{const n=norm(l);if(/\bht\b|h\.t|hors taxe/.test(n))ht.push(...get(i));else if(/tva|t\.v\.a/.test(n))tv.push(...amounts(l))});
+  L.forEach((l,i)=>{const n=norm(l);if(/\bht\b|h\.t|hors taxe/.test(n))ht.push(...get(i));else if(/\btva\b|t\.v\.a/.test(n))tv.push(...amounts(l))});
   const H=ht.length?Math.max(...ht):0;
   if(H){const T=[...new Set(tv)].filter(v=>v<H*.25).reduce((a,b)=>a+b,0);if((!best||Math.abs(best-H)<.011)&&T>0)best=+(H+T).toFixed(2)}
   const all=[...new Set(L.flatMap(l=>{const n=norm(l);return BAD.test(n)&&!T1.test(n)?[]:amounts(l)}))].sort((a,b)=>b-a).slice(0,6);
@@ -358,30 +381,43 @@ function pickAmount(L){
   if(best&&!all.includes(best))all.unshift(best);
   return {best,all:all.slice(0,6)};
 }
+
 function fixDateOcr(s){
-  return norm(s)
-    .replace(/([0-9])[oOlI](?=[0-9\/.\-])/g,'$10')
-    .replace(/([\/.\-])[oOlI]([0-9])/g,'$10$2')
-    .replace(/([\/.\-][0-9]{1,2}[\/.\-])[oOlI]([0-9])/g,'$10$2');
+  return fixNumOcr(norm(s))
+    .replace(/(\d{1,2})\s*[\/.\-]\s*(\d{1,2})\s*[\/.\-]\s*(\d{2,4})/g,(_,d,m,y)=>{
+      const f=x=>x.replace(/o/g,'0').replace(/[li]/g,'1').replace(/s/g,'5').replace(/b/g,'8');
+      return `${f(d)}/${f(m)}/${f(y)}`;
+    });
 }
+
 function pickDate(L){
   const maxY=new Date().getFullYear()+1,c=[];
-  const ok=(d,m,y)=>{d=+d;m=+m;y=+y;if(y<100)y+=2000;return d>=1&&d<=31&&m>=1&&m<=12&&y>=2015&&y<=maxY?`${y}-${p2(m)}-${p2(d)}`:null};
+  const ok=(d,m,y)=>{
+    d=+d;m=+m;y=+y;
+    if(y<100)y+=2000;
+    if(d<1||d>31||m<1||m>12||y<2015||y>maxY)return null;
+    const dt=new Date(Date.UTC(y,m-1,d));
+    if(dt.getUTCFullYear()!==y||dt.getUTCMonth()!==m-1||dt.getUTCDate()!==d)return null;
+    return `${y}-${p2(m)}-${p2(d)}`;
+  };
   L.forEach((l,i)=>{
     const t=fixDateOcr(l);
-    if(/echeance|valid|limite|expir|naissance/.test(t))return;
-    const sc=(/date|facture|emis|vente|ticket|le\b|du\b/.test(t)?2:1)-i*.001;let m;
-    const r1=/(\d{1,2})\s?[\/.\-]\s?(\d{1,2})\s?[\/.\-]\s?(\d{4}|\d{2})(?!\d)/g;
+    if(/echeance|valid|limite|expir|naissance|ne\(e\)|siret|siren|iban/.test(t))return;
+    let sc=(/date|facture|emis|vente|ticket|\ble\b|\bdu\b|commande|reglement|paye/.test(t)?2.5:1.2)-i*.002;
+    if(/\d{1,2}[:h]\d{2}/.test(t))sc+=0.8;
+    let m;
+    const r1=/\b(\d{1,2})\s?[\/.\-]\s?(\d{1,2})\s?[\/.\-]\s?(\d{4}|\d{2})\b/g;
     while((m=r1.exec(t))){const d=ok(m[1],m[2],m[3]);if(d)c.push([sc,d])}
-    const r2=/(\d{4})[\/.\-](\d{2})[\/.\-](\d{2})/g;
+    const r2=/\b(\d{4})[\/.\-](\d{2})[\/.\-](\d{2})\b/g;
     while((m=r2.exec(t))){const d=ok(m[3],m[2],m[1]);if(d)c.push([sc,d])}
-    const r3=/(\d{1,2})\s+(janv|jan|janvier|fevr|fev|fevrier|mars|mar|avr|avril|mai|juin|juil|juillet|aout|sept|sep|septembre|oct|octobre|nov|novembre|dec|decembre)[a-z.]*\s+(\d{4}|\d{2})/g;
+    const r3=/\b(\d{1,2})\s+(janv|jan|janvier|fevr|fev|fevrier|mars|mar|avr|avril|mai|juin|juil|juillet|aout|sept|sep|septembre|oct|octobre|nov|novembre|dec|decembre)[a-z.]*\s+(\d{4}|\d{2})\b/g;
     while((m=r3.exec(t))){const d=ok(m[1],MOIS[m[2]],m[3]);if(d)c.push([sc,d])}
   });
   c.sort((a,b)=>b[0]-a[0]);return c.length?c[0][1]:'';
 }
+
 function brand(L){
-  const top=L.slice(0,15).map(key);
+  const top=L.slice(0,16).map(key);
   for(const l of top)for(const B of BRANDS){const k=key(B);if(k.length>=4&&l.includes(k))return B}
   for(const B of BRANDS){const k=key(B),tol=k.length>8?2:1;if(k.length<5)continue;
     for(const l of top)for(let i=0;i+k.length<=l.length;i++)if(lev(k,l.substr(i,k.length))<=tol)return B}
@@ -389,12 +425,13 @@ function brand(L){
   for(const B of BRANDS){const k=key(B);if(k.length>=4&&all.includes(k))return B}
   return '';
 }
+
 function vendors(L){
-  const J=/\b(ticket|facture|caisse|client|tel|siret|siren|tva|cedex|merci|bienvenue|date|code|total|montant|eur|rcs|naf|ape)\b|www|http|@|\brue\b|avenue|boulevard|n°|\d{5}/;
+  const J=/\b(ticket|facture|caisse|client|tel|siret|siren|tva|cedex|merci|bienvenue|date|code|total|montant|eur|rcs|naf|ape|t\.t\.c|h\.t)\b|www|http|@|\brue\b|avenue|boulevard|impasse|chemin|n°|\b\d{5}\b/;
   const c=[];
   L.slice(0,14).forEach((l,i)=>{
     const n=norm(l),lt=(l.match(/[A-Za-zÀ-ÿ]/g)||[]).length;
-    if(lt<3||lt/l.length<.45||l.length>50||J.test(n))return;
+    if(lt<3||lt/l.length<.4||l.length>50||J.test(n))return;
     const up=(l.match(/[A-ZÀ-Ý]/g)||[]).length/lt;
     const s=lt+(up>.7?8:0)+(/sarl|sas|eurl|sasu|\bsa\b|ets /.test(n)?6:0)-i*1.5;
     c.push([s,l.replace(/^[^A-Za-zÀ-ÿ0-9]+|[^A-Za-zÀ-ÿ0-9.!)]+$/g,'')]);
@@ -403,11 +440,13 @@ function vendors(L){
   if(w)c.push([5,w[1].replace(/^./,x=>x.toUpperCase())]);
   return c.sort((a,b)=>b[0]-a[0]).map(x=>x[1]).filter((v,i,a)=>v&&a.indexOf(v)===i).slice(0,4);
 }
+
 function parse(t){
   const L=String(t||'').split('\n').map(s=>s.trim()).filter(s=>s.length>1);
   const a=pickAmount(L),v=vendors(L),b=brand(L);
   return {vendor:b||v[0]||'',vendors:b?[b,...v.filter(x=>x!==b)].slice(0,4):v,date:pickDate(L),amount:a.best?a.best.toFixed(2):'',amounts:a.all};
 }
+
 async function getWorker(){
   if(!worker){
     worker=await Tesseract.createWorker('fra',1,{logger:m=>{if(m.status==='recognizing text')$('#status').textContent='Lecture… '+Math.round(m.progress*100)+'%'}});
@@ -415,6 +454,7 @@ async function getWorker(){
   }
   return worker;
 }
+
 $('#file').onchange=async e=>{
   const f=e.target.files[0];if(!f)return;
   blob=await shrink(f);
@@ -492,17 +532,17 @@ function render(){
   for(const a in g){
     const L=g[a].filter(r=>r.kind==='loyer'),D=g[a].filter(r=>r.kind!=='loyer');
     const s=x=>x.reduce((t,r)=>t+Number(r.amount),0),N=L.reduce((t,r)=>t+nights(r.date,r.date_end),0);
-    h+=`<h3>${esc(a)}</h3><p>Loyers : <b>${eur(s(L))}</b>${N?` (${N} nuits)`:''} · Dépenses : <b>${eur(s(D))}</b> · Résultat : <b>${eur(s(L)-s(D))}</b></p><table><tr><th>Date</th><th>Type</th><th>Libellé</th><th>Catégorie</th><th class="n">Montant</th><th>Commentaire</th><th>Pièce</th><th class="noprint"></th></tr>`;
+    h+=`<h3>${esc(a)}</h3><p>Loyers : <b>${eur(s(L))}</b>${N?` (${N} nuits)`:''} · Dépenses : <b>${eur(s(D))}</b> · Résultat : <b>${eur(s(L)-s(D))}</b></p><table><tr><th>Date</th><th>Type</th><th>Libellé</th><th>Catégorie</th><th class="n">Montant</th><th>Commentaire</th><th>Pièce</th><th class="noprint">Actions</th></tr>`;
     g[a].forEach(r=>{
       const l=r.kind==='loyer',n=nights(r.date,r.date_end);
-      h+=`<tr><td>${l&&r.date_end?`${fr(r.date)} → ${fr(r.date_end)} (${n} n.)`:fr(r.date)}</td><td>${l?'Loyer':'Dépense'}</td><td>${esc(r.vendor)}</td><td>${esc(r.category)}</td><td class="n">${eur(r.amount)}</td><td style="white-space:normal">${esc(r.comment)}</td><td>${r.receipt_url?`<a href="${esc(safeUrl(r.receipt_url))}" target="_blank" rel="noopener">voir</a>`:''}</td><td class="noprint"><button class="del" style="color:var(--ac);border-color:var(--ac)" onclick="edit('${r.id}')">✏️</button> <button class="del" onclick="del('${r.id}')">✕</button></td></tr>`});
+      h+=`<tr><td>${l&&r.date_end?`${fr(r.date)} → ${fr(r.date_end)} (${n} n.)`:fr(r.date)}</td><td>${l?'Loyer':'Dépense'}</td><td>${esc(r.vendor)}</td><td>${esc(r.category)}</td><td class="n">${eur(r.amount)}</td><td style="white-space:normal">${esc(r.comment)}</td><td>${r.receipt_url?`<a href="${esc(safeUrl(r.receipt_url))}" target="_blank" rel="noopener">voir</a>`:''}</td><td class="noprint"><button type="button" class="ed" onclick="edit('${esc(r.id)}')">✏️</button><button type="button" class="del" onclick="del('${esc(r.id)}')">✕</button></td></tr>`});
     h+='</table>';
   }
   $('#list').innerHTML=h;
 }
 let eid=null;
 function edit(id){
-  const r=rows.find(x=>x.id===id);if(!r)return;eid=id;
+  const r=rows.find(x=>String(x.id)===String(id));if(!r)return;eid=r.id;
   const l=r.kind==='loyer';
   const opt=(arr,v)=>(arr.includes(v)?arr:[...arr,v]).map(x=>`<option${x===v?' selected':''}>${esc(x)}</option>`).join('');
   $('#eDate').value=r.date;$('#eEnd').value=r.date_end||'';$('#eVen').value=r.vendor||'';$('#eAmt').value=r.amount;$('#eCom').value=r.comment||'';
@@ -514,7 +554,8 @@ function edit(id){
   $('#dlg').showModal();
 }
 $('#eSave').onclick=async()=>{
-  const r=rows.find(x=>x.id===eid),l=r.kind==='loyer';
+  const r=rows.find(x=>String(x.id)===String(eid));if(!r)return;
+  const l=r.kind==='loyer';
   if(!$('#eDate').value||!$('#eAmt').value)return alert('Date et montant requis.');
   if(l&&(!$('#eEnd').value||$('#eEnd').value<=$('#eDate').value))return alert('Le départ doit être après l’arrivée.');
   const u={date:$('#eDate').value,vendor:$('#eVen').value,amount:round2($('#eAmt').value),apartment:$('#eApt').value,category:l?'Loyer':$('#eCat').value,comment:$('#eCom').value};
@@ -526,7 +567,7 @@ $('#eSave').onclick=async()=>{
 $('#eCancel').onclick=()=>$('#dlg').close();
 async function del(id){
   if(!confirm('Supprimer cette ligne ?'))return;
-  const r=rows.find(x=>x.id===id);
+  const r=rows.find(x=>String(x.id)===String(id));
   const {error}=await sb.from('expenses').delete().eq('id',id);
   if(error)return alert(error.message);
   if(r&&r.receipt_url){const p=extractStoragePath(r.receipt_url);if(p)await sb.storage.from('receipts').remove([p])}
@@ -548,13 +589,20 @@ $('#bCsv').onclick=()=>{
 };
 
 const f2=n=>Number(n||0).toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,' ')+' EUR';
+function targetApts(){
+  const sel=$('#pdfApt').value;
+  if(sel&&sel!=='__all__')return apts().includes(sel)?[sel]:[sel];
+  return apts();
+}
 async function makePdf(save=true){
   const y=$('#yr').value;
+  const listApt=targetApts();
+  if(!listApt.length)return alert('Aucun appartement sélectionné.');
   const {data,error}=await sb.from('expenses').select('*').gte('date',y+'-01-01').lte('date',y+'-12-31').order('date');
   if(error)return alert(error.message);
   const doc=new window.jspdf.jsPDF();
   const sum=x=>x.reduce((t,r)=>t+Number(r.amount),0);
-  apts().forEach((a,i)=>{
+  listApt.forEach((a,i)=>{
     if(i)doc.addPage();
     const R=data.filter(r=>r.apartment===a),L=R.filter(r=>r.kind==='loyer'),D=R.filter(r=>r.kind!=='loyer');
     let cy=18;
@@ -594,17 +642,19 @@ async function makePdf(save=true){
       doc.setTextColor(0);
     }
   });
-  if(save)doc.save(`dossier-comptable-LMNP-${y}.pdf`);
+  const suffix=$('#pdfApt').value&&$('#pdfApt').value!=='__all__'?'-'+$('#pdfApt').value.replace(/[^a-z0-9]+/gi,'_'):'';
+  if(save)doc.save(`dossier-comptable-LMNP-${y}${suffix}.pdf`);
   return doc;
 }
 $('#bPdf').onclick=()=>makePdf();
 const yr=()=>[$('#yr').value+'-01-01',$('#yr').value+'-12-31'];
 $('#bArch').onclick=async()=>{
-  const y=$('#yr').value,st=$('#arSt'),[d1,d2]=yr();
+  const y=$('#yr').value,st=$('#arSt'),[d1,d2]=yr(),listApt=targetApts();
   const {data,error}=await sb.from('expenses').select('*').gte('date',d1).lte('date',d2).order('date');
   if(error)return alert(error.message);
-  const imgs=data.filter(r=>r.receipt_url);
-  if(!imgs.length)return alert('Aucune photo en '+y);
+  const filtered=data.filter(r=>listApt.includes(r.apartment));
+  const imgs=filtered.filter(r=>r.receipt_url);
+  if(!imgs.length)return alert('Aucune photo pour cette sélection en '+y);
   const zip=new JSZip(),used={};let n=0,fail=0;
   const clean=t=>String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\w.-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,30)||'sans-nom';
   for(const r of imgs){
@@ -618,10 +668,11 @@ $('#bArch').onclick=async()=>{
   }
   st.textContent='Création du PDF…';
   const doc=await makePdf(false);
-  zip.file(`dossier-comptable-LMNP-${y}.pdf`,doc.output('arraybuffer'));
+  const suffix=$('#pdfApt').value&&$('#pdfApt').value!=='__all__'?'-'+clean($('#pdfApt').value):'';
+  zip.file(`dossier-comptable-LMNP-${y}${suffix}.pdf`,doc.output('arraybuffer'));
   st.textContent='Compression…';
   const out=await zip.generateAsync({type:'blob'});
-  const a=document.createElement('a');a.href=URL.createObjectURL(out);a.download=`archive-LMNP-${y}.zip`;a.click();
+  const a=document.createElement('a');a.href=URL.createObjectURL(out);a.download=`archive-LMNP-${y}${suffix}.zip`;a.click();
   st.textContent=`✅ Archive ${y} téléchargée : ${imgs.length-fail} photo(s)${fail?`, ${fail} échec(s)`:''}. Ouvrez le ZIP et vérifiez-le avant de libérer l’espace.`;
 };
 
