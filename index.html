@@ -39,7 +39,7 @@ dialog{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-
   <b>Connexion</b>
   <label>URL Supabase</label><input id="cUrl" placeholder="https://xxxx.supabase.co">
   <label>Clé « anon public »</label><input id="cKey">
-  <label>Clé API IA gratuite (Gemini — utilisée en permanence avec l’OCR local)</label><input id="cAiKey" type="password" autocomplete="off" placeholder="AQ....">
+  <label>Clé API IA (Mistral — utilisée en permanence avec l’OCR local)</label><input id="cAiKey" type="password" autocomplete="off" placeholder="Mstrl_...">
   <label>Email</label><input id="cMail" type="email" autocomplete="username">
   <label>Mot de passe</label><input id="cPw" type="password" autocomplete="current-password">
   <div class="row"><button id="bLogin">Connexion</button><button id="bSign" class="sec">Créer le compte</button></div>
@@ -132,7 +132,7 @@ Table déjà créée avant cette version ? Lancez : <code>alter table expenses a
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script>
 const $=s=>document.querySelector(s);
-const DEFAULT_AI_KEY='AQ.Ab8RN6JGP_sCGDnjozMpDNZJ63KnrYQtMUi_w3DHcEunFVOHFA';
+const DEFAULT_AI_KEY='Mstrl_ep2pmmppe1EPEn8qSJtFQKWrl0sznank_2gLKAT';
 let sb,user,blob,rows=[],lastV=[],lastA=[],worker=null;
 const DEF=['Assurance','Taxe foncière','Travaux','Entretien / réparation','Ameublement','Décoration','Électroménager','Charges / copropriété','Frais de gestion','Frais bancaires / emprunt','Autre'];
 let S={cats:[],apts:[]};
@@ -513,34 +513,44 @@ function blobToBase64(b){
   });
 }
 
+function extractJsonObject(txt){
+  const clean=String(txt||'').replace(/```json\s*|```/gi,'').trim();
+  const match=clean.match(/\{[\s\S]*\}/);
+  return JSON.parse(match?match[0]:clean);
+}
+
 async function askAiVision(imgBlob){
   const aiKey=getAiKey();
   if(!aiKey)return null;
   const b64=await blobToBase64(imgBlob);
-  const models=['gemini-3.6-flash','gemini-3.5-flash-lite','gemini-3-flash','gemini-2.5-flash'];
+  const mime=imgBlob.type||'image/jpeg';
+  const models=['mistral-small-latest','pixtral-12b-2409'];
   let lastErr=null;
 
   for(const model of models){
-    const resp=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,{
+    const resp=await fetch('https://api.mistral.ai/v1/chat/completions',{
       method:'POST',
       headers:{
         'Content-Type':'application/json',
-        'x-goog-api-key':aiKey
+        'Authorization':'Bearer '+aiKey
       },
       body:JSON.stringify({
-        contents:[{
-          parts:[
-            {text:'Extrais de ce ticket ou cette facture : vendor (nom commercial ou fournisseur), date (format YYYY-MM-DD, date d’émission/achat), amount (montant total TTC en nombre décimal, ex. 42.50). Réponds uniquement avec un objet JSON valide, sans markdown.'},
-            {inline_data:{mime_type:imgBlob.type||'image/jpeg',data:b64}}
+        model,
+        temperature:0,
+        response_format:{type:'json_object'},
+        messages:[{
+          role:'user',
+          content:[
+            {type:'text',text:'Extrais de ce ticket ou cette facture : vendor (nom commercial ou fournisseur), date (format YYYY-MM-DD, date d’émission/achat), amount (montant total TTC en nombre décimal, ex. 42.50). Réponds uniquement avec un objet JSON valide.'},
+            {type:'image_url',image_url:{url:`data:${mime};base64,${b64}`}}
           ]
-        }],
-        generationConfig:{responseMimeType:'application/json'}
+        }]
       })
     });
     if(resp.ok){
       const json=await resp.json();
-      const txt=json?.candidates?.[0]?.content?.parts?.[0]?.text||'{}';
-      const parsed=JSON.parse(txt);
+      const txt=json?.choices?.[0]?.message?.content||'{}';
+      const parsed=extractJsonObject(txt);
       const amtNum=Number(String(parsed.amount??'').replace(',','.'));
       return {
         vendor:String(parsed.vendor||'').trim(),
@@ -549,7 +559,9 @@ async function askAiVision(imgBlob){
         rawJson:`[${model}] ${txt}`
       };
     }
-    lastErr=new Error('HTTP '+resp.status);
+    let detail='';
+    try{const errBody=await resp.json();detail=errBody?.message||errBody?.error?.message||''}catch(e){}
+    lastErr=new Error('HTTP '+resp.status+(detail?' - '+detail:''));
     if(resp.status!==404)throw lastErr;
   }
   throw lastErr||new Error('HTTP 404');
@@ -615,7 +627,7 @@ $('#file').onchange=async e=>{
   }
 
   if(hasAi){
-    $('#status').textContent='Analyse IA en cours…';
+    $('#status').textContent='Analyse IA Mistral en cours…';
     try{
       ai=await askAiVision(blob);
       $('#raw').textContent=($('#raw').textContent?$('#raw').textContent+'\n\n':'')+'--- IA Vision ---\n'+ai.rawJson;
