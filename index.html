@@ -517,7 +517,7 @@ async function askAiVision(imgBlob){
   const aiKey=getAiKey();
   if(!aiKey)return null;
   const b64=await blobToBase64(imgBlob);
-  const models=['gemini-2.5-flash','gemini-2.5-flash-lite','gemini-2.0-flash'];
+  const models=['gemini-3.6-flash','gemini-3.5-flash-lite','gemini-3-flash','gemini-2.5-flash'];
   let lastErr=null;
 
   for(const model of models){
