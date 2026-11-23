@@ -39,7 +39,6 @@ dialog{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-
   <b>Connexion</b>
   <label>URL Supabase</label><input id="cUrl" placeholder="https://xxxx.supabase.co">
   <label>Clé « anon public »</label><input id="cKey">
-  <label>Clé API IA (Mistral — utilisée en permanence avec l’OCR local)</label><input id="cAiKey" type="password" autocomplete="off" placeholder="Mstrl_...">
   <label>Email</label><input id="cMail" type="email" autocomplete="username">
   <label>Mot de passe</label><input id="cPw" type="password" autocomplete="current-password">
   <div class="row"><button id="bLogin">Connexion</button><button id="bSign" class="sec">Créer le compte</button></div>
@@ -64,7 +63,7 @@ Table déjà créée avant cette version ? Lancez : <code>alter table expenses a
     <input id="file" type="file" accept="image/*" capture="environment">
     <img id="preview" alt="">
     <div id="chips"></div>
-    <details><summary>Texte lu par l’OCR / IA</summary><pre id="raw"></pre></details></div>
+    <details><summary>Texte lu par l’OCR local</summary><pre id="raw"></pre></details></div>
     <div id="status"></div>
     <div class="row"><div><label id="dateL">Date</label><input id="fDate" type="date"></div>
     <div id="endBox" class="hide"><label>Départ</label><input id="fEnd" type="date"></div></div>
@@ -132,7 +131,6 @@ Table déjà créée avant cette version ? Lancez : <code>alter table expenses a
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <script>
 const $=s=>document.querySelector(s);
-const DEFAULT_AI_KEY='Mstrl_ep2pmmppe1EPEn8qSJtFQKWrl0sznank_2gLKAT';
 let sb,user,blob,rows=[],lastV=[],lastA=[],worker=null;
 const DEF=['Assurance','Taxe foncière','Travaux','Entretien / réparation','Ameublement','Décoration','Électroménager','Charges / copropriété','Frais de gestion','Frais bancaires / emprunt','Autre'];
 let S={cats:[],apts:[]};
@@ -150,12 +148,6 @@ const fr=s=>s?s.split('-').reverse().join('/'):'';
 const safeUrl=u=>u?encodeURI(String(u).trim()):'';
 const round2=n=>Math.round((Number(n)+Number.EPSILON)*100)/100;
 
-function getAiKey(){
-  const stored=(cfg().aiKey||'').trim();
-  const field=$('#cAiKey')?$('#cAiKey').value.trim():'';
-  return field||stored||DEFAULT_AI_KEY;
-}
-
 function extractStoragePath(url){
   if(!url)return '';
   try{
@@ -171,7 +163,7 @@ function extractStoragePath(url){
 
 async function init(){
   const c=cfg();
-  $('#cUrl').value=c.url||'';$('#cKey').value=c.key||'';$('#cAiKey').value=(c.aiKey||DEFAULT_AI_KEY);
+  $('#cUrl').value=c.url||'';$('#cKey').value=c.key||'';
   if(c.url&&c.key){
     sb=supabase.createClient(c.url,c.key);
     const {data}=await sb.auth.getSession();
@@ -180,7 +172,7 @@ async function init(){
   $('#login').classList.remove('hide');
 }
 function saveCfg(){
-  localStorage.setItem('cfg',JSON.stringify({url:$('#cUrl').value.trim(),key:$('#cKey').value.trim(),aiKey:getAiKey()}));
+  localStorage.setItem('cfg',JSON.stringify({url:$('#cUrl').value.trim(),key:$('#cKey').value.trim()}));
   const c=cfg();sb=supabase.createClient(c.url,c.key);
 }
 async function auth(sign){
@@ -504,89 +496,18 @@ function parse(t){
   return {vendor:b||v[0]||'',vendors:b?[b,...v.filter(x=>x!==b)].slice(0,4):v,date:pickDate(L),amount:a.best?a.best.toFixed(2):'',amounts:a.all};
 }
 
-function blobToBase64(b){
-  return new Promise((res,rej)=>{
-    const r=new FileReader();
-    r.onload=()=>res(String(r.result||'').split(',')[1]||'');
-    r.onerror=rej;
-    r.readAsDataURL(b);
-  });
-}
-
-function extractJsonObject(txt){
-  const clean=String(txt||'').replace(/```json\s*|```/gi,'').trim();
-  const match=clean.match(/\{[\s\S]*\}/);
-  return JSON.parse(match?match[0]:clean);
-}
-
-async function askAiVision(imgBlob){
-  const aiKey=getAiKey();
-  if(!aiKey)return null;
-  const b64=await blobToBase64(imgBlob);
-  const mime=imgBlob.type||'image/jpeg';
-  const models=['mistral-small-latest','pixtral-12b-2409'];
-  let lastErr=null;
-
-  for(const model of models){
-    const resp=await fetch('https://api.mistral.ai/v1/chat/completions',{
-      method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'Authorization':'Bearer '+aiKey
-      },
-      body:JSON.stringify({
-        model,
-        temperature:0,
-        response_format:{type:'json_object'},
-        messages:[{
-          role:'user',
-          content:[
-            {type:'text',text:'Extrais de ce ticket ou cette facture : vendor (nom commercial ou fournisseur), date (format YYYY-MM-DD, date d’émission/achat), amount (montant total TTC en nombre décimal, ex. 42.50). Réponds uniquement avec un objet JSON valide.'},
-            {type:'image_url',image_url:{url:`data:${mime};base64,${b64}`}}
-          ]
-        }]
-      })
-    });
-    if(resp.ok){
-      const json=await resp.json();
-      const txt=json?.choices?.[0]?.message?.content||'{}';
-      const parsed=extractJsonObject(txt);
-      const amtNum=Number(String(parsed.amount??'').replace(',','.'));
-      return {
-        vendor:String(parsed.vendor||'').trim(),
-        date:/^\d{4}-\d{2}-\d{2}$/.test(String(parsed.date||''))?String(parsed.date):'',
-        amount:!Number.isNaN(amtNum)&&amtNum>0?round2(amtNum).toFixed(2):'',
-        rawJson:`[${model}] ${txt}`
-      };
-    }
-    let detail='';
-    try{const errBody=await resp.json();detail=errBody?.message||errBody?.error?.message||''}catch(e){}
-    lastErr=new Error('HTTP '+resp.status+(detail?' - '+detail:''));
-    if(resp.status!==404)throw lastErr;
-  }
-  throw lastErr||new Error('HTTP 404');
-}
-
 function renderChips(){
   $('#chips').innerHTML=(lastV.length?'<div>Magasin ? '+lastV.map((v,i)=>`<button class="chip" type="button" onclick="$('#fVen').value=lastV[${i}]">${esc(v)}</button>`).join('')+'</div>':'')+
     (lastA.length?'<div>Montant TTC ? '+lastA.map((a,i)=>`<button class="chip" type="button" onclick="$('#fAmt').value=lastA[${i}].toFixed(2)">${eur(a)}</button>`).join('')+'</div>':'');
 }
 
-function applyMerged(localObj,aiObj){
-  const vendor=(aiObj&&aiObj.vendor)||localObj.vendor||'';
-  const date=(aiObj&&aiObj.date)||localObj.date||'';
-  const amount=(aiObj&&aiObj.amount)||localObj.amount||'';
-
-  const vList=[...new Set([...(aiObj&&aiObj.vendor?[aiObj.vendor]:[]),...(localObj.vendors||[])])].filter(Boolean).slice(0,4);
-  const aNums=[...new Set([...(aiObj&&aiObj.amount?[+aiObj.amount]:[]),...(localObj.amounts||[])])].filter(x=>Number(x)>0).slice(0,6);
-
-  if(vendor)$('#fVen').value=vendor;
-  if(date)$('#fDate').value=date;
-  if(amount)$('#fAmt').value=amount;
-  lastV=vList;
-  lastA=aNums;
+function applyLocal(localObj){
+  if(localObj.vendor)$('#fVen').value=localObj.vendor;
+  if(localObj.date)$('#fDate').value=localObj.date;
+  if(localObj.amount)$('#fAmt').value=localObj.amount;
+  lastV=(localObj.vendors||[]).slice(0,4);
+  lastA=(localObj.amounts||[]).slice(0,6);
   renderChips();
-  return {vendor,date,amount};
 }
 
 async function getWorker(){
@@ -603,10 +524,7 @@ $('#file').onchange=async e=>{
   $('#preview').src=URL.createObjectURL(blob);$('#preview').style.display='block';
   $('#chips').innerHTML='';$('#raw').textContent='';
 
-  const hasAi=Boolean(getAiKey());
   let o={vendor:'',date:'',amount:'',vendors:[],amounts:[]};
-  let ai=null,aiErr='';
-
   try{
     $('#status').textContent='Nettoyage photo & OCR local…';
     const pre=await prep(f,'clean'),w=await getWorker();
@@ -621,34 +539,14 @@ $('#file').onchange=async e=>{
       raw+='\n--- 2e lecture OCR ---\n'+r2.data.text;
     }
     $('#raw').textContent=raw;
-    applyMerged(o,null);
-  }catch(err){
-    $('#raw').textContent='OCR local indisponible.';
-  }
-
-  if(hasAi){
-    $('#status').textContent='Analyse IA Mistral en cours…';
-    try{
-      ai=await askAiVision(blob);
-      $('#raw').textContent=($('#raw').textContent?$('#raw').textContent+'\n\n':'')+'--- IA Vision ---\n'+ai.rawJson;
-    }catch(err){
-      aiErr=err.message;
-    }
-  }
-
-  const finalRes=applyMerged(o,ai);
-  const miss=[!finalRes.vendor&&'magasin',!finalRes.date&&'date',!finalRes.amount&&'montant'].filter(Boolean);
-
-  if(ai){
-    $('#status').textContent=miss.length
-      ?'🤖+OCR : reste à compléter '+miss.join(', ')+'.'
-      :'🤖+OCR : lu (vérifiez magasin, date et montant TTC avant d’enregistrer).';
-  }else if(hasAi&&aiErr){
-    $('#status').textContent=(miss.length?'⚠️ OCR incomplet ('+miss.join(', ')+') · ':'✅ OCR local · ')+'IA non joignable ('+aiErr+').';
-  }else{
+    applyLocal(o);
+    const miss=[!o.vendor&&'magasin',!o.date&&'date',!o.amount&&'montant'].filter(Boolean);
     $('#status').textContent=miss.length
       ?'⚠️ OCR local : non lu '+miss.join(', ')+'.'
       :'✅ OCR local : vérifiez magasin, date et montant TTC avant d’enregistrer.';
+  }catch(err){
+    $('#raw').textContent='OCR local indisponible.';
+    $('#status').textContent='⚠️ OCR local indisponible : saisissez les champs manuellement.';
   }
 };
 
