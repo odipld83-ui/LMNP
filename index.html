@@ -63,7 +63,7 @@ Table déjà créée avant cette version ? Lancez : <code>alter table expenses a
     <input id="file" type="file" accept="image/*" capture="environment">
     <img id="preview" alt="">
     <div id="chips"></div>
-    <details><summary>Texte lu par l’OCR local</summary><pre id="raw"></pre></details></div>
+    <details><summary>Texte lu par l’OCR</summary><pre id="raw"></pre></details></div>
     <div id="status"></div>
     <div class="row"><div><label id="dateL">Date</label><input id="fDate" type="date"></div>
     <div id="endBox" class="hide"><label>Départ</label><input id="fEnd" type="date"></div></div>
@@ -429,7 +429,6 @@ function pickAmount(L){
 
 function fixDateOcr(s){
   return fixNumOcr(norm(s))
-    .replace(/\b1er\b/g,'1')
     .replace(/(\d{1,2})\s*[\/.\-]\s*(\d{1,2})\s*[\/.\-]\s*([0-9olsb]{2,4})/gi,(_,d,m,y)=>{
       const f=x=>String(x).replace(/[o]/g,'0').replace(/[li|]/g,'1').replace(/[s]/g,'5').replace(/[b]/g,'8');
       return `${f(d)}/${f(m)}/${f(y)}`;
@@ -475,15 +474,14 @@ function brand(L){
 }
 
 function vendors(L){
-  const J=/\b(ticket|facture|devis|caisse|client|tel|siret|siren|tva|cedex|merci|bienvenue|date|code|total|montant|eur|rcs|naf|ape|t\.t\.c|h\.t)\b|www|http|@|\brue\b|avenue|boulevard|impasse|chemin|n°|\b\d{5}\b/;
+  const J=/\b(ticket|facture|caisse|client|tel|siret|siren|tva|cedex|merci|bienvenue|date|code|total|montant|eur|rcs|naf|ape|t\.t\.c|h\.t)\b|www|http|@|\brue\b|avenue|boulevard|impasse|chemin|n°|\b\d{5}\b/;
   const c=[];
   L.slice(0,14).forEach((l,i)=>{
     const n=norm(l),lt=(l.match(/[A-Za-zÀ-ÿ]/g)||[]).length;
     if(lt<3||lt/l.length<.4||l.length>50||J.test(n))return;
     const up=(l.match(/[A-ZÀ-Ý]/g)||[]).length/lt;
     const s=lt+(up>.7?8:0)+(/sarl|sas|eurl|sasu|\bsa\b|ets /.test(n)?6:0)-i*1.5;
-    const cleanLine=l.replace(/^[^A-Za-zÀ-ÿ0-9]+|[^A-Za-zÀ-ÿ0-9.!)]+$/g,'').replace(/\s+\b(?:SARL|SAS|EURL|SASU|SA)\b$/i,'').trim();
-    if(cleanLine.length>=3)c.push([s,cleanLine]);
+    c.push([s,l.replace(/^[^A-Za-zÀ-ÿ0-9]+|[^A-Za-zÀ-ÿ0-9.!)]+$/g,'')]);
   });
   const w=L.join(' ').match(/www\.([a-z0-9-]+)\./i);
   if(w)c.push([5,w[1].replace(/^./,x=>x.toUpperCase())]);
@@ -496,23 +494,9 @@ function parse(t){
   return {vendor:b||v[0]||'',vendors:b?[b,...v.filter(x=>x!==b)].slice(0,4):v,date:pickDate(L),amount:a.best?a.best.toFixed(2):'',amounts:a.all};
 }
 
-function renderChips(){
-  $('#chips').innerHTML=(lastV.length?'<div>Magasin ? '+lastV.map((v,i)=>`<button class="chip" type="button" onclick="$('#fVen').value=lastV[${i}]">${esc(v)}</button>`).join('')+'</div>':'')+
-    (lastA.length?'<div>Montant TTC ? '+lastA.map((a,i)=>`<button class="chip" type="button" onclick="$('#fAmt').value=lastA[${i}].toFixed(2)">${eur(a)}</button>`).join('')+'</div>':'');
-}
-
-function applyLocal(localObj){
-  if(localObj.vendor)$('#fVen').value=localObj.vendor;
-  if(localObj.date)$('#fDate').value=localObj.date;
-  if(localObj.amount)$('#fAmt').value=localObj.amount;
-  lastV=(localObj.vendors||[]).slice(0,4);
-  lastA=(localObj.amounts||[]).slice(0,6);
-  renderChips();
-}
-
 async function getWorker(){
   if(!worker){
-    worker=await Tesseract.createWorker('fra',1,{logger:m=>{if(m.status==='recognizing text')$('#status').textContent='OCR local… '+Math.round(m.progress*100)+'%'}});
+    worker=await Tesseract.createWorker('fra',1,{logger:m=>{if(m.status==='recognizing text')$('#status').textContent='Lecture… '+Math.round(m.progress*100)+'%'}});
     await worker.setParameters({tessedit_pageseg_mode:'4',preserve_interword_spaces:'1'});
   }
   return worker;
@@ -523,31 +507,31 @@ $('#file').onchange=async e=>{
   blob=await shrink(f);
   $('#preview').src=URL.createObjectURL(blob);$('#preview').style.display='block';
   $('#chips').innerHTML='';$('#raw').textContent='';
-
-  let o={vendor:'',date:'',amount:'',vendors:[],amounts:[]};
   try{
-    $('#status').textContent='Nettoyage photo & OCR local…';
+    $('#status').textContent='Nettoyage et éclairage de la photo…';
     const pre=await prep(f,'clean'),w=await getWorker();
-    const r=await w.recognize(pre);let raw=r.data.text;o=parse(raw);
+    $('#status').textContent='Lecture du ticket…';
+    const r=await w.recognize(pre);let raw=r.data.text;const o=parse(raw);
     if(!o.vendor||!o.date||!o.amount){
+      $('#status').textContent='Deuxième lecture (contraste renforcé)…';
       const preHigh=await prep(f,'high');
       await w.setParameters({tessedit_pageseg_mode:'6'});
       const r2=await w.recognize(preHigh);await w.setParameters({tessedit_pageseg_mode:'4'});
       const o2=parse(r2.data.text);
       o.vendor=o.vendor||o2.vendor;o.date=o.date||o2.date;o.amount=o.amount||o2.amount;
       o.vendors=[...new Set([...o.vendors,...o2.vendors])].slice(0,4);o.amounts=[...new Set([...o.amounts,...o2.amounts])].slice(0,6);
-      raw+='\n--- 2e lecture OCR ---\n'+r2.data.text;
+      raw+='\n--- 2e lecture (contraste renforcé) ---\n'+r2.data.text;
     }
     $('#raw').textContent=raw;
-    applyLocal(o);
+    if(o.vendor)$('#fVen').value=o.vendor;
+    if(o.date)$('#fDate').value=o.date;
+    if(o.amount)$('#fAmt').value=o.amount;
+    lastV=o.vendors;lastA=o.amounts;
+    $('#chips').innerHTML=(lastV.length?'<div>Magasin ? '+lastV.map((v,i)=>`<button class="chip" type="button" onclick="$('#fVen').value=lastV[${i}]">${esc(v)}</button>`).join('')+'</div>':'')+
+      (lastA.length?'<div>Montant TTC ? '+lastA.map((a,i)=>`<button class="chip" type="button" onclick="$('#fAmt').value=lastA[${i}].toFixed(2)">${eur(a)}</button>`).join('')+'</div>':'');
     const miss=[!o.vendor&&'magasin',!o.date&&'date',!o.amount&&'montant'].filter(Boolean);
-    $('#status').textContent=miss.length
-      ?'⚠️ OCR local : non lu '+miss.join(', ')+'.'
-      :'✅ OCR local : vérifiez magasin, date et montant TTC avant d’enregistrer.';
-  }catch(err){
-    $('#raw').textContent='OCR local indisponible.';
-    $('#status').textContent='⚠️ OCR local indisponible : saisissez les champs manuellement.';
-  }
+    $('#status').textContent=miss.length?'⚠️ Non lu : '+miss.join(', ')+'. Complétez à la main (texte lu ci-dessous).':'✅ Lu : vérifiez magasin, date et montant TTC avant d’enregistrer.';
+  }catch(err){$('#status').textContent='Lecture impossible, saisissez à la main.'}
 };
 
 $('#bSave').onclick=async()=>{
