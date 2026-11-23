@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notes de frais LMNP</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1c1f24;--mut:#6b7280;--ac:#2563eb;--bd:#e2e5ea;--ok:#16a34a;--ko:#dc2626}
+@media (prefers-color-scheme:dark){:root{--bg:#111418;--card:#1b1f25;--tx:#e8eaee;--mut:#9aa3af;--ac:#5b8def;--bd:#2c323a}}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.4 system-ui,sans-serif;background:var(--bg);color:var(--tx);padding:12px;max-width:900px;margin:auto}
+h1{font-size:20px;margin:6px 0 12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px}
+label{display:block;font-size:13px;color:var(--mut);margin:10px 0 3px}
+input,select,textarea,button{font:inherit;width:100%;padding:10px;border-radius:8px;border:1px solid var(--bd);background:var(--bg);color:var(--tx)}
+button{background:var(--ac);color:#fff;border:0;cursor:pointer;font-weight:600;margin-top:10px}
+button.sec{background:transparent;color:var(--ac);border:1px solid var(--ac)}
+button.del{width:auto;padding:4px 8px;margin:0;background:transparent;color:var(--ko);border:1px solid var(--ko);font-size:12px}
+.row{display:flex;gap:8px}.row>*{flex:1}
+.tabs{display:flex;gap:8px;margin-bottom:12px}.tabs button{margin:0;background:var(--card);color:var(--tx);border:1px solid var(--bd)}.tabs button.on{background:var(--ac);color:#fff}
+#preview{max-width:100%;max-height:220px;border-radius:8px;display:none;margin-top:10px}
+#status{font-size:13px;color:var(--mut);margin-top:8px}
+.hide{display:none!important}
+.tw{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{padding:6px 8px;border-bottom:1px solid var(--bd);text-align:left;white-space:nowrap}
+td.n,th.n{text-align:right}tr.sub td{font-weight:700;background:var(--bg)}
+a{color:var(--ac)}details{font-size:13px;color:var(--mut);margin-top:10px}pre{white-space:pre-wrap;background:var(--bg);padding:8px;border-radius:8px;font-size:12px;color:var(--tx)}
+dialog{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:12px;width:min(92vw,420px);padding:14px}dialog::backdrop{background:rgba(0,0,0,.5)}
+@media print{body{background:#fff;color:#000}.noprint,.tabs{display:none!important}.card{border:0}}
+</style>
+</head>
+<body>
+<h1>🧾 Notes de frais LMNP</h1>
+
+<!-- CONFIG + LOGIN -->
+<div id="login" class="card hide">
+  <b>Connexion</b>
+  <label>URL Supabase</label><input id="cUrl" placeholder="https://xxxx.supabase.co">
+  <label>Clé « anon public »</label><input id="cKey">
+  <label>Email</label><input id="cMail" type="email" autocomplete="username">
+  <label>Mot de passe</label><input id="cPw" type="password" autocomplete="current-password">
+  <div class="row"><button id="bLogin">Connexion</button><button id="bSign" class="sec">Créer le compte</button></div>
+  <div id="lmsg" style="color:var(--ko);font-size:13px;margin-top:8px"></div>
+  <details><summary>Installation Supabase (SQL à coller une fois)</summary>
+<pre>create table expenses (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz default now(),
+  user_id uuid default auth.uid(),
+  date date, vendor text, amount numeric(10,2),
+  apartment text, category text, comment text, receipt_url text,
+  kind text default 'depense'
+);
+alter table expenses enable row level security;
+create policy "mine" on expenses for all
+  using (auth.uid()=user_id) with check (auth.uid()=user_id);
+
+insert into storage.buckets (id,name,public)
+  values ('receipts','receipts',true);
+create policy "up" on storage.objects for insert
+  to authenticated with check (bucket_id='receipts');
+create policy "rm" on storage.objects for delete
+  to authenticated using (bucket_id='receipts');</pre>
+Si la table existe déjà : <code>alter table expenses add column kind text default 'depense';</code><br>Ensuite, dans Authentication → Providers → Email, désactivez « Confirm email » si vous voulez vous connecter tout de suite, et désactivez les inscriptions après avoir créé votre compte.
+  </details>
+</div>
+
+<!-- APP -->
+<div id="app" class="hide">
+  <div class="tabs"><button id="t1" class="on">➕ Ajouter</button><button id="t2">📊 Récap</button><button id="t3">⚙️ Réglages</button></div>
+
+  <div id="p1" class="card">
+    <label>Type</label><select id="fKind"><option value="depense">Dépense (ticket / facture)</option><option value="loyer">Loyer reçu</option></select>
+    <div id="photoBox"><label>Photo du ticket / de la facture</label>
+    <input id="file" type="file" accept="image/*" capture="environment">
+    <img id="preview" alt=""></div>
+    <div id="status"></div>
+    <div class="row"><div><label id="dateL">Date</label><input id="fDate" type="date"></div>
+    <div><label>Montant TTC (€)</label><input id="fAmt" type="number" step="0.01" inputmode="decimal"></div></div>
+    <label id="venL">Fournisseur</label><input id="fVen">
+    <div class="row"><div><label>Appartement</label><select id="fApt"></select></div>
+    <div id="catBox"><label>Catégorie</label><select id="fCat"></select></div></div>
+    <label>Commentaire</label><textarea id="fCom" rows="2"></textarea>
+    <button id="bSave">Enregistrer</button>
+    <button id="bOut" class="sec">Déconnexion</button>
+  </div>
+
+  <div id="p3" class="card hide">
+    <b>Appartements</b><div id="aptSet"></div>
+    <button class="sec" onclick="addApt()">➕ Ajouter un appartement</button>
+    <b style="display:block;margin-top:18px">Catégories</b><div id="catSet" style="margin-top:8px"></div>
+    <button class="sec" onclick="addCat()">➕ Ajouter une catégorie</button>
+  </div>
+
+  <div id="p2" class="card hide">
+    <div class="row noprint"><select id="yr"></select><select id="aptF"></select></div>
+    <div class="row noprint"><button id="bCsv">⬇️ Export CSV</button><button id="bPrint" class="sec">🖨️ Imprimer / PDF</button></div>
+    <button id="bPdf" class="noprint">📄 Dossier comptable PDF (les 2 appartements)</button>
+    <button id="bArch" class="sec noprint">🗄️ Archiver l’année (ZIP photos + PDF)</button>
+    <button id="bFree" class="sec noprint" style="color:var(--ko);border-color:var(--ko)">🧹 Libérer l’espace : supprimer les photos de l’année</button>
+    <div id="arSt" class="noprint" style="font-size:13px;color:var(--mut);margin-top:8px"></div>
+    <div id="list" class="tw" style="margin-top:12px"></div>
+  </div>
+</div>
+
+<dialog id="dlg">
+  <b>Modifier la ligne</b>
+  <div class="row"><div><label>Date</label><input id="eDate" type="date"></div><div><label>Montant (€)</label><input id="eAmt" type="number" step="0.01" inputmode="decimal"></div></div>
+  <label>Libellé (fournisseur / locataire)</label><input id="eVen">
+  <div class="row"><div><label>Appartement</label><select id="eApt"></select></div><div id="eCatBox"><label>Catégorie</label><select id="eCat"></select></div></div>
+  <label>Commentaire</label><textarea id="eCom" rows="2"></textarea>
+  <div id="eImg" style="margin-top:8px;font-size:14px"></div>
+  <div class="row"><button id="eSave">Enregistrer</button><button id="eCancel" class="sec">Annuler</button></div>
+</dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+const $=s=>document.querySelector(s);
+let sb,user,blob,rows=[];
+const DEF=['Assurance','Taxe foncière','Travaux','Entretien / réparation','Ameublement','Décoration','Électroménager','Charges / copropriété','Frais de gestion','Frais bancaires / emprunt','Autre'];
+let S={cats:[],apts:[]};
+const cfg=()=>{try{return JSON.parse(localStorage.getItem('cfg')||'{}')}catch(e){return{}}};
+const apts=()=>S.apts.map(a=>a.name);
+const eur=n=>Number(n||0).toLocaleString('fr-FR',{style:'currency',currency:'EUR'});
+const esc=s=>String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+async function init(){
+  const c=cfg();
+  $('#cUrl').value=c.url||'';$('#cKey').value=c.key||'';
+  if(c.url&&c.key){
+    sb=supabase.createClient(c.url,c.key);
+    const {data}=await sb.auth.getSession();
+    if(data.session){user=data.session.user;return showApp()}
+  }
+  $('#login').classList.remove('hide');
+}
+function saveCfg(){
+  localStorage.setItem('cfg',JSON.stringify({url:$('#cUrl').value.trim(),key:$('#cKey').value.trim()}));
+  const c=cfg();sb=supabase.createClient(c.url,c.key);
+}
+async function auth(sign){
+  try{saveCfg();
+  const f={email:$('#cMail').value,password:$('#cPw').value};
+  const {data,error}=sign?await sb.auth.signUp(f):await sb.auth.signInWithPassword(f);
+  if(error)throw error;
+  if(!data.session){$('#lmsg').textContent='Compte créé. Confirmez l’email puis connectez-vous.';return}
+  user=data.session.user;showApp();
+  }catch(e){$('#lmsg').textContent=e.message}
+}
+$('#bLogin').onclick=()=>auth(false);$('#bSign').onclick=()=>auth(true);
+$('#bOut').onclick=async()=>{await sb.auth.signOut();location.reload()};
+
+function showApp(){
+  $('#login').classList.add('hide');$('#app').classList.remove('hide');
+  loadS();fillSel();renderSet();
+  const y=new Date().getFullYear();
+  $('#yr').innerHTML=[y,y-1,y-2].map(v=>`<option>${v}</option>`).join('');
+  $('#fDate').valueAsDate=new Date();
+  if(!S.apts.length)setTimeout(()=>{alert('Commencez par ajouter votre premier appartement.');tab(3)},150);
+}
+function tab(n){
+  [1,2,3].forEach(i=>{$('#p'+i).classList.toggle('hide',n!=i);$('#t'+i).classList.toggle('on',n==i)});
+  if(n==2)load();
+}
+$('#t1').onclick=()=>tab(1);$('#t2').onclick=()=>tab(2);$('#t3').onclick=()=>tab(3);
+
+$('#fKind').onchange=()=>{
+  const l=$('#fKind').value==='loyer';
+  $('#photoBox').classList.toggle('hide',l);$('#catBox').classList.toggle('hide',l);
+  $('#venL').textContent=l?'Locataire / période (ex. Dupont – mars)':'Fournisseur';
+  $('#dateL').textContent=l?'Date de réception':'Date';
+  if(l){blob=null;$('#file').value='';$('#preview').style.display='none'}
+};
+function loadS(){
+  const m=(user&&user.user_metadata)||{};
+  S.cats=m.cats&&m.cats.length?m.cats:DEF.slice();
+  S.apts=m.apts||[];
+}
+async function persist(){
+  const {data,error}=await sb.auth.updateUser({data:{cats:S.cats,apts:S.apts}});
+  if(error)alert(error.message);else user=data.user;
+}
+function fillSel(){
+  const kA=$('#fApt').value,kC=$('#fCat').value,o=a=>`<option>${esc(a)}</option>`;
+  $('#fApt').innerHTML='<option value="">Choisir…</option>'+S.apts.map(a=>o(a.name)).join('')+'<option value="__new__">➕ Nouvel appartement…</option>';
+  $('#aptF').innerHTML='<option value="">Tous les appartements</option>'+S.apts.map(a=>o(a.name)).join('');
+  $('#fCat').innerHTML=S.cats.map(o).join('')+'<option value="__new__">➕ Nouvelle catégorie…</option>';
+  if(kA&&kA!=='__new__')$('#fApt').value=kA;
+  if(kC&&kC!=='__new__')$('#fCat').value=kC;
+}
+function renderSet(){
+  $('#aptSet').innerHTML=S.apts.map((a,i)=>`<div class="card" style="margin-top:8px"><label>Nom</label><input id="an${i}" value="${esc(a.name)}"><label>Adresse</label><input id="ad${i}" value="${esc(a.addr)}"><div class="row"><button onclick="saveApt(${i})">Enregistrer</button><button class="sec" onclick="delApt(${i})">Retirer</button></div></div>`).join('')||'<p>Aucun appartement.</p>';
+  $('#catSet').innerHTML=S.cats.map((c,i)=>`<div class="row" style="margin-bottom:6px;align-items:center"><span>${esc(c)}</span><button class="del" style="flex:0" onclick="delCat(${i})">✕</button></div>`).join('');
+}
+async function addApt(){
+  const name=(prompt('Nom de l’appartement (ex. Studio Lyon)')||'').trim();
+  if(!name||S.apts.some(a=>a.name===name)){fillSel();return}
+  const addr=(prompt('Adresse complète')||'').trim();
+  S.apts.push({name,addr});await persist();fillSel();$('#fApt').value=name;renderSet();
+}
+async function addCat(){
+  const n=(prompt('Nouvelle catégorie')||'').trim();
+  if(n&&!S.cats.includes(n)){S.cats.push(n);await persist()}
+  fillSel();if(n)$('#fCat').value=n;renderSet();
+}
+async function saveApt(i){
+  const old=S.apts[i].name,name=$('#an'+i).value.trim(),addr=$('#ad'+i).value.trim();
+  if(!name)return;
+  if(name!==old){const {error}=await sb.from('expenses').update({apartment:name}).eq('apartment',old);if(error)return alert(error.message)}
+  S.apts[i]={name,addr};await persist();fillSel();renderSet();
+}
+async function delApt(i){
+  if(!confirm('Retirer cet appartement de la liste ? Ses lignes restent en base mais ne seront plus dans le PDF.'))return;
+  S.apts.splice(i,1);await persist();fillSel();renderSet();
+}
+async function delCat(i){S.cats.splice(i,1);await persist();fillSel();renderSet()}
+$('#fApt').onchange=()=>{if($('#fApt').value==='__new__')addApt()};
+$('#fCat').onchange=()=>{if($('#fCat').value==='__new__')addCat()};
+// Réduction image
+function shrink(file){return new Promise(res=>{
+  const img=new Image();img.onload=()=>{
+    const m=1600,k=Math.min(1,m/Math.max(img.width,img.height));
+    const c=document.createElement('canvas');c.width=img.width*k;c.height=img.height*k;
+    c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+    c.toBlob(b=>res(b),'image/jpeg',.82)};
+  img.src=URL.createObjectURL(file)})}
+
+// Lecture du ticket
+function parse(t){
+  const L=t.split('\n').map(l=>l.trim()).filter(Boolean);
+  const num=s=>parseFloat(s.replace(/\s/g,'').replace(',','.'));
+  const re=/\d+[ ]?\d*[.,]\d{2}/g;
+  const out={vendor:(L.find(l=>/[A-Za-zÀ-ÿ]{3,}/.test(l))||'').slice(0,60)};
+  const d=t.match(/(\d{2})[\/.\-](\d{2})[\/.\-](\d{4}|\d{2})\b/);
+  if(d){const y=d[3].length==2?'20'+d[3]:d[3];out.date=`${y}-${d[2]}-${d[1]}`}
+  let c=[];L.filter(l=>/total|ttc|à payer|a payer|montant|net/i.test(l)).forEach(l=>(l.match(re)||[]).forEach(m=>c.push(num(m))));
+  if(!c.length)(t.match(re)||[]).forEach(m=>c.push(num(m)));
+  c=c.filter(x=>x>0&&x<100000);
+  if(c.length)out.amount=Math.max(...c).toFixed(2);
+  return out;
+}
+$('#file').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;
+  blob=await shrink(f);
+  $('#preview').src=URL.createObjectURL(blob);$('#preview').style.display='block';
+  $('#status').textContent='Lecture du ticket…';
+  try{
+    const r=await Tesseract.recognize(blob,'fra',{logger:m=>{if(m.status==='recognizing text')$('#status').textContent='Lecture… '+Math.round(m.progress*100)+'%'}});
+    const o=parse(r.data.text);
+    if(o.vendor)$('#fVen').value=o.vendor;if(o.date)$('#fDate').value=o.date;if(o.amount)$('#fAmt').value=o.amount;
+    $('#status').textContent='✅ Données lues : vérifiez-les avant d’enregistrer.';
+  }catch(err){$('#status').textContent='Lecture impossible, saisissez à la main.'}
+};
+
+$('#bSave').onclick=async()=>{
+  if(!$('#fAmt').value||!$('#fDate').value||!$('#fApt').value){$('#status').textContent='Date, montant et appartement requis.';return}
+  $('#bSave').disabled=true;$('#status').textContent='Enregistrement…';
+  try{
+    let url=null;
+    if(blob){
+      const path=`${user.id}/${crypto.randomUUID()}.jpg`;
+      const {error}=await sb.storage.from('receipts').upload(path,blob,{contentType:'image/jpeg'});
+      if(error)throw error;
+      url=sb.storage.from('receipts').getPublicUrl(path).data.publicUrl;
+    }
+    const {error}=await sb.from('expenses').insert({date:$('#fDate').value,vendor:$('#fVen').value,amount:$('#fAmt').value,apartment:$('#fApt').value,kind:$('#fKind').value,category:$('#fKind').value==='loyer'?'Loyer':$('#fCat').value,comment:$('#fCom').value,receipt_url:url});
+    if(error)throw error;
+    $('#status').textContent='✅ Enregistré.';
+    blob=null;$('#preview').style.display='none';$('#file').value='';$('#fVen').value='';$('#fAmt').value='';$('#fCom').value='';
+  }catch(e){$('#status').textContent='Erreur : '+e.message}
+  $('#bSave').disabled=false;
+};
+
+async function load(){
+  const y=$('#yr').value;
+  const {data,error}=await sb.from('expenses').select('*').gte('date',y+'-01-01').lte('date',y+'-12-31').order('date');
+  if(error){$('#list').textContent=error.message;return}
+  rows=data;render();
+}
+$('#yr').onchange=load;$('#aptF').onchange=render;
+function groups(){
+  const f=$('#aptF').value,g={};
+  rows.filter(r=>!f||r.apartment===f).forEach(r=>(g[r.apartment]=g[r.apartment]||[]).push(r));
+  return g;
+}
+function render(){
+  const g=groups();let h='';
+  if(!Object.keys(g).length)h='<p>Aucune ligne.</p>';
+  for(const a in g){
+    const L=g[a].filter(r=>r.kind==='loyer'),D=g[a].filter(r=>r.kind!=='loyer');
+    const s=x=>x.reduce((t,r)=>t+Number(r.amount),0);
+    h+=`<h3>${esc(a)}</h3><p>Loyers : <b>${eur(s(L))}</b> · Dépenses : <b>${eur(s(D))}</b> · Résultat : <b>${eur(s(L)-s(D))}</b></p><table><tr><th>Date</th><th>Type</th><th>Libellé</th><th>Catégorie</th><th class="n">Montant</th><th>Commentaire</th><th>Pièce</th><th class="noprint"></th></tr>`;
+    g[a].forEach(r=>{h+=`<tr><td>${r.date}</td><td>${r.kind==='loyer'?'Loyer':'Dépense'}</td><td>${esc(r.vendor)}</td><td>${esc(r.category)}</td><td class="n">${eur(r.amount)}</td><td style="white-space:normal">${esc(r.comment)}</td><td>${r.receipt_url?`<a href="${r.receipt_url}" target="_blank">voir</a>`:''}</td><td class="noprint"><button class="del" style="color:var(--ac);border-color:var(--ac)" onclick="edit('${r.id}')">✏️</button> <button class="del" onclick="del('${r.id}')">✕</button></td></tr>`});
+    h+='</table>';
+  }
+  $('#list').innerHTML=h;
+}
+let eid=null;
+function edit(id){
+  const r=rows.find(x=>x.id===id);if(!r)return;eid=id;
+  const opt=(arr,v)=>(arr.includes(v)?arr:[...arr,v]).map(x=>`<option${x===v?' selected':''}>${esc(x)}</option>`).join('');
+  $('#eDate').value=r.date;$('#eVen').value=r.vendor||'';$('#eAmt').value=r.amount;$('#eCom').value=r.comment||'';
+  $('#eApt').innerHTML=opt(apts(),r.apartment);
+  $('#eCat').innerHTML=opt(S.cats,r.category);
+  $('#eCatBox').classList.toggle('hide',r.kind==='loyer');
+  $('#eImg').innerHTML=r.receipt_url?`<a href="${r.receipt_url}" target="_blank">Voir la pièce jointe</a>`:'';
+  $('#dlg').showModal();
+}
+$('#eSave').onclick=async()=>{
+  const r=rows.find(x=>x.id===eid);
+  if(!$('#eDate').value||!$('#eAmt').value)return alert('Date et montant requis.');
+  const {error}=await sb.from('expenses').update({date:$('#eDate').value,vendor:$('#eVen').value,amount:$('#eAmt').value,apartment:$('#eApt').value,category:r.kind==='loyer'?'Loyer':$('#eCat').value,comment:$('#eCom').value}).eq('id',eid);
+  if(error)return alert(error.message);
+  $('#dlg').close();load();
+};
+$('#eCancel').onclick=()=>$('#dlg').close();
+async function del(id){
+  if(!confirm('Supprimer cette dépense ?'))return;
+  const r=rows.find(x=>x.id===id);
+  await sb.from('expenses').delete().eq('id',id);
+  if(r&&r.receipt_url){const p=r.receipt_url.split('/receipts/')[1];if(p)await sb.storage.from('receipts').remove([p])}
+  load();
+}
+$('#bPrint').onclick=()=>window.print();
+$('#bCsv').onclick=()=>{
+  const g=groups(),q=s=>'"'+String(s??'').replace(/"/g,'""')+'"';
+  let c='Appartement;Type;Date;Libellé;Catégorie;Montant TTC;Commentaire;Justificatif\n';
+  for(const a in g){
+    let t=0;
+    g[a].forEach(r=>{t+=(r.kind==='loyer'?1:-1)*Number(r.amount);c+=[q(a),q(r.kind==='loyer'?'Loyer':'Dépense'),r.date,q(r.vendor),q(r.category),String(r.amount).replace('.',','),q(r.comment),q(r.receipt_url)].join(';')+'\n'});
+    c+=[q('RÉSULTAT '+a),'','','','',String(t.toFixed(2)).replace('.',','),'',''].join(';')+'\n\n';
+  }
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['\ufeff'+c],{type:'text/csv;charset=utf-8'}));
+  a.download=`notes-de-frais-${$('#yr').value}.csv`;a.click();
+};
+const f2=n=>Number(n||0).toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,' ')+' EUR';
+async function makePdf(save=true){
+  const y=$('#yr').value;
+  const {data,error}=await sb.from('expenses').select('*').gte('date',y+'-01-01').lte('date',y+'-12-31').order('date');
+  if(error)return alert(error.message);
+  const doc=new window.jspdf.jsPDF();
+  const sum=x=>x.reduce((t,r)=>t+Number(r.amount),0);
+  apts().forEach((a,i)=>{
+    if(i)doc.addPage();
+    const R=data.filter(r=>r.apartment===a),L=R.filter(r=>r.kind==='loyer'),D=R.filter(r=>r.kind!=='loyer');
+    let cy=18;
+    doc.setFontSize(16);doc.text(`${a} - Récapitulatif LMNP ${y}`,14,cy);cy+=6;
+    const ad=(S.apts.find(x=>x.name===a)||{}).addr;if(ad){doc.setFontSize(10);doc.text(ad,14,cy+2);cy+=6}
+    const T=(title,head,body,opt={})=>{
+      if(cy>250){doc.addPage();cy=18}
+      doc.setFontSize(12);doc.text(title,14,cy+4);
+      doc.autoTable(Object.assign({startY:cy+7,head:[head],body,theme:'grid',styles:{fontSize:9},headStyles:{fillColor:[37,99,235]}},opt));
+      cy=doc.lastAutoTable.finalY+8;
+    };
+    T('Synthèse',['Poste','Montant'],[['Recettes (loyers encaissés)',f2(sum(L))],['Dépenses (TTC)',f2(sum(D))],['Résultat avant amortissements',f2(sum(L)-sum(D))]]);
+    T('Loyers encaissés',['Date','Locataire / période','Commentaire','Montant'],L.map(r=>[r.date,r.vendor||'',r.comment||'',f2(r.amount)]).concat([['','','TOTAL',f2(sum(L))]]));
+    const cats={};D.forEach(r=>cats[r.category||'Autre']=(cats[r.category||'Autre']||0)+Number(r.amount));
+    T('Dépenses par catégorie',['Catégorie','Montant'],Object.entries(cats).map(([k,v])=>[k,f2(v)]).concat([['TOTAL',f2(sum(D))]]));
+    T('Détail des dépenses',['Date','Fournisseur','Catégorie','Commentaire','Justificatif','Montant'],D.map(r=>[r.date,r.vendor||'',r.category||'',r.comment||'',r.receipt_url?'Voir la pièce':'-',f2(r.amount)]),{
+      columnStyles:{4:{textColor:[37,99,235]}},
+      didDrawCell:h=>{if(h.section==='body'&&h.column.index===4&&D[h.row.index]&&D[h.row.index].receipt_url)doc.link(h.cell.x,h.cell.y,h.cell.width,h.cell.height,{url:D[h.row.index].receipt_url})}
+    });
+  });
+  if(save)doc.save(`dossier-comptable-LMNP-${y}.pdf`);
+  return doc;
+}
+$('#bPdf').onclick=()=>makePdf();
+const yr=()=>[$('#yr').value+'-01-01',$('#yr').value+'-12-31'];
+$('#bArch').onclick=async()=>{
+  const y=$('#yr').value,st=$('#arSt'),[d1,d2]=yr();
+  const {data,error}=await sb.from('expenses').select('*').gte('date',d1).lte('date',d2).order('date');
+  if(error)return alert(error.message);
+  const imgs=data.filter(r=>r.receipt_url);
+  if(!imgs.length)return alert('Aucune photo en '+y);
+  const zip=new JSZip(),used={};let n=0,fail=0;
+  const clean=t=>String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^\w.-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,30)||'sans-nom';
+  for(const r of imgs){
+    st.textContent=`Téléchargement ${++n}/${imgs.length}…`;
+    try{
+      const b=await (await fetch(r.receipt_url)).blob();
+      let name=`${clean(r.apartment)}/${r.date}_${clean(r.vendor)}_${r.amount}`;
+      used[name]=(used[name]||0)+1;if(used[name]>1)name+='_'+used[name];
+      zip.file(name+'.jpg',b);
+    }catch(e){fail++}
+  }
+  st.textContent='Création du PDF…';
+  const doc=await makePdf(false);
+  zip.file(`dossier-comptable-LMNP-${y}.pdf`,doc.output('arraybuffer'));
+  st.textContent='Compression…';
+  const out=await zip.generateAsync({type:'blob'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(out);a.download=`archive-LMNP-${y}.zip`;a.click();
+  st.textContent=`✅ Archive téléchargée : ${imgs.length-fail} photo(s)${fail?`, ${fail} échec(s)`:''}. Ouvrez le ZIP et vérifiez-le avant de libérer l’espace.`;
+};
+$('#bFree').onclick=async()=>{
+  const y=$('#yr').value,[d1,d2]=yr();
+  const {data,error}=await sb.from('expenses').select('id,receipt_url').gte('date',d1).lte('date',d2).not('receipt_url','is',null);
+  if(error)return alert(error.message);
+  if(!data.length)return alert('Aucune photo en '+y);
+  if(prompt(`Supprimer définitivement ${data.length} photo(s) de ${y} de Supabase ?\nÀ ne faire qu’APRÈS avoir téléchargé et vérifié l’archive ZIP.\nTapez SUPPRIMER pour confirmer.`)!=='SUPPRIMER')return;
+  const paths=data.map(r=>r.receipt_url.split('/receipts/')[1]).filter(Boolean);
+  for(let i=0;i<paths.length;i+=100){const {error}=await sb.storage.from('receipts').remove(paths.slice(i,i+100));if(error)return alert(error.message)}
+  await sb.from('expenses').update({receipt_url:null}).in('id',data.map(r=>r.id));
+  $('#arSt').textContent=`✅ ${paths.length} photo(s) supprimée(s) de Supabase.`;load();
+};
+init();
+</script>
+</body>
+</html>
