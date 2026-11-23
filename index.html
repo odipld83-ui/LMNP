@@ -90,16 +90,12 @@ Table déjà créée avant cette version ? Lancez : <code>alter table expenses a
   <div id="p2" class="card hide">
     <div class="row noprint">
       <div><label>Année</label><select id="yr"></select></div>
-      <div><label>Filtre affichage</label><select id="aptF"></select></div>
-    </div>
-    <div class="noprint">
-      <label>Appartement pour téléchargement (PDF / ZIP)</label>
-      <select id="pdfApt"></select>
+      <div><label>Appartement (affichage, PDF, ZIP)</label><select id="aptF"></select></div>
     </div>
     <div id="cnt" class="noprint"></div>
     <div class="row noprint"><button id="bCsv">⬇️ Export CSV</button><button id="bPrint" class="sec">🖨️ Imprimer</button></div>
-    <button id="bPdf" class="noprint">📄 Télécharger le PDF (appartement sélectionné)</button>
-    <button id="bArch" class="sec noprint">🗄️ Télécharger l’archive ZIP (photos + PDF)</button>
+    <button id="bPdf" class="noprint">📄 Dossier comptable PDF</button>
+    <button id="bArch" class="sec noprint">🗄️ Archiver l’année choisie (ZIP photos + PDF)</button>
     <button id="bFree" class="sec noprint" style="color:var(--ko);border-color:var(--ko)">🧹 Libérer l’espace : supprimer les photos de l’année choisie</button>
     <div id="arSt" class="noprint"></div>
     <div id="list" class="tw" style="margin-top:12px"></div>
@@ -274,16 +270,14 @@ async function persist(){
   if(error)alert(error.message);else user=data.user;
 }
 function fillSel(){
-  const kA=$('#fApt').value,kC=$('#fCat').value,kF=$('#aptF').value,kP=$('#pdfApt').value;
+  const kA=$('#fApt').value,kC=$('#fCat').value,kF=$('#aptF').value;
   const o=a=>`<option>${esc(a)}</option>`;
   $('#fApt').innerHTML='<option value="">Choisir…</option>'+S.apts.map(a=>o(a.name)).join('')+'<option value="__new__">➕ Nouvel appartement…</option>';
   $('#aptF').innerHTML='<option value="">Tous les appartements</option>'+S.apts.map(a=>o(a.name)).join('');
-  $('#pdfApt').innerHTML='<option value="__all__">Tous les appartements</option>'+S.apts.map(a=>o(a.name)).join('');
   $('#fCat').innerHTML=S.cats.map(o).join('')+'<option value="__new__">➕ Nouvelle catégorie…</option>';
   if(kA&&kA!=='__new__')$('#fApt').value=kA;
   if(kC&&kC!=='__new__')$('#fCat').value=kC;
   if(kF&&S.apts.some(a=>a.name===kF))$('#aptF').value=kF;
-  if(kP&&S.apts.some(a=>a.name===kP))$('#pdfApt').value=kP;
 }
 function renderSet(){
   $('#aptSet').innerHTML=S.apts.map((a,i)=>`<div class="card" style="margin-top:8px"><label>Nom</label><input id="an${i}" value="${esc(a.name)}"><label>Adresse</label><input id="ad${i}" value="${esc(a.addr)}"><div class="row"><button onclick="saveApt(${i})">Enregistrer</button><button class="sec" onclick="delApt(${i})">Retirer</button></div></div>`).join('')||'<p>Aucun appartement.</p>';
@@ -590,14 +584,14 @@ $('#bCsv').onclick=()=>{
 
 const f2=n=>Number(n||0).toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,' ')+' EUR';
 function targetApts(){
-  const sel=$('#pdfApt').value;
-  if(sel&&sel!=='__all__')return apts().includes(sel)?[sel]:[sel];
+  const sel=$('#aptF').value;
+  if(sel)return [sel];
   return apts();
 }
 async function makePdf(save=true){
   const y=$('#yr').value;
   const listApt=targetApts();
-  if(!listApt.length)return alert('Aucun appartement sélectionné.');
+  if(!listApt.length)return alert('Aucun appartement.');
   const {data,error}=await sb.from('expenses').select('*').gte('date',y+'-01-01').lte('date',y+'-12-31').order('date');
   if(error)return alert(error.message);
   const doc=new window.jspdf.jsPDF();
@@ -642,7 +636,7 @@ async function makePdf(save=true){
       doc.setTextColor(0);
     }
   });
-  const suffix=$('#pdfApt').value&&$('#pdfApt').value!=='__all__'?'-'+$('#pdfApt').value.replace(/[^a-z0-9]+/gi,'_'):'';
+  const suffix=$('#aptF').value?'-'+$('#aptF').value.replace(/[^a-z0-9]+/gi,'_'):'';
   if(save)doc.save(`dossier-comptable-LMNP-${y}${suffix}.pdf`);
   return doc;
 }
@@ -668,7 +662,7 @@ $('#bArch').onclick=async()=>{
   }
   st.textContent='Création du PDF…';
   const doc=await makePdf(false);
-  const suffix=$('#pdfApt').value&&$('#pdfApt').value!=='__all__'?'-'+clean($('#pdfApt').value):'';
+  const suffix=$('#aptF').value?'-'+clean($('#aptF').value):'';
   zip.file(`dossier-comptable-LMNP-${y}${suffix}.pdf`,doc.output('arraybuffer'));
   st.textContent='Compression…';
   const out=await zip.generateAsync({type:'blob'});
