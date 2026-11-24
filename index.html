@@ -686,17 +686,29 @@ function groups(){
   rows.filter(r=>!f||r.apartment===f).forEach(r=>(g[r.apartment]=g[r.apartment]||[]).push(r));
   return g;
 }
+const catOrder=c=>{const i=S.cats.indexOf(c);return i<0?999:i};
+function byCat(D){
+  const m={};D.forEach(r=>{const c=r.category||'Autre';(m[c]=m[c]||[]).push(r)});
+  return Object.keys(m).sort((x,y)=>catOrder(x)-catOrder(y)||x.localeCompare(y,'fr')).map(c=>[c,m[c]]);
+}
 function render(){
   const g=groups();let h='';
   if(!Object.keys(g).length)h='<p>Aucune ligne.</p>';
+  const row=r=>{
+    const l=r.kind==='loyer',n=nights(r.date,r.date_end);
+    return `<tr><td>${l&&r.date_end?`${fr(r.date)} → ${fr(r.date_end)} (${n} n.)`:fr(r.date)}</td><td>${esc(r.vendor)}</td><td class="n">${eur(r.amount)}</td><td style="white-space:normal">${esc(r.comment)}</td><td>${r.receipt_url?`<a href="${esc(safeUrl(r.receipt_url))}" target="_blank" rel="noopener">voir</a>`:''}</td><td class="noprint"><button type="button" class="ed" onclick="edit('${esc(r.id)}')">✏️</button><button type="button" class="del" onclick="del('${esc(r.id)}')">✕</button></td></tr>`;
+  };
+  const head=first=>`<tr><th>${first}</th><th>Libellé</th><th class="n">Montant</th><th>Commentaire</th><th>Pièce</th><th class="noprint">Actions</th></tr>`;
+  const sub=(label,tot)=>`<tr><td colspan="2"><b>${esc(label)}</b></td><td class="n"><b>${eur(tot)}</b></td><td colspan="3"></td></tr>`;
   for(const a in g){
     const L=g[a].filter(r=>r.kind==='loyer'),D=g[a].filter(r=>r.kind!=='loyer');
     const s=x=>x.reduce((t,r)=>t+Number(r.amount),0),N=L.reduce((t,r)=>t+nights(r.date,r.date_end),0);
-    h+=`<h3>${esc(a)}</h3><p>Loyers : <b>${eur(s(L))}</b>${N?` (${N} nuits)`:''} · Dépenses : <b>${eur(s(D))}</b> · Résultat : <b>${eur(s(L)-s(D))}</b></p><table><tr><th>Date</th><th>Type</th><th>Libellé</th><th>Catégorie</th><th class="n">Montant</th><th>Commentaire</th><th>Pièce</th><th class="noprint">Actions</th></tr>`;
-    g[a].forEach(r=>{
-      const l=r.kind==='loyer',n=nights(r.date,r.date_end);
-      h+=`<tr><td>${l&&r.date_end?`${fr(r.date)} → ${fr(r.date_end)} (${n} n.)`:fr(r.date)}</td><td>${l?'Loyer':'Dépense'}</td><td>${esc(r.vendor)}</td><td>${esc(r.category)}</td><td class="n">${eur(r.amount)}</td><td style="white-space:normal">${esc(r.comment)}</td><td>${r.receipt_url?`<a href="${esc(safeUrl(r.receipt_url))}" target="_blank" rel="noopener">voir</a>`:''}</td><td class="noprint"><button type="button" class="ed" onclick="edit('${esc(r.id)}')">✏️</button><button type="button" class="del" onclick="del('${esc(r.id)}')">✕</button></td></tr>`});
-    h+='</table>';
+    h+=`<h3>${esc(a)}</h3><p>Loyers : <b>${eur(s(L))}</b>${N?` (${N} nuits)`:''} · Dépenses : <b>${eur(s(D))}</b> · Résultat : <b>${eur(s(L)-s(D))}</b></p>`;
+    if(L.length)h+=`<h4 style="margin:14px 0 4px">Loyers <span style="color:var(--mut);font-weight:400">(${L.length})</span></h4><table>${head('Séjour')}${L.map(row).join('')}${sub('Total loyers',s(L))}</table>`;
+    byCat(D).forEach(([c,R])=>{
+      h+=`<h4 style="margin:14px 0 4px">${esc(c)} <span style="color:var(--mut);font-weight:400">(${R.length})</span></h4><table>${head('Date')}${R.map(row).join('')}${sub('Sous-total '+c,s(R))}</table>`;
+    });
+    if(D.length)h+=`<p style="margin-top:10px">Total dépenses ${esc(a)} : <b>${eur(s(D))}</b></p>`;
   }
   $('#list').innerHTML=h;
 }
@@ -782,14 +794,18 @@ async function makePdf(save=true){
     const cats={};D.forEach(r=>cats[r.category||'Autre']=(cats[r.category||'Autre']||0)+Number(r.amount));
     T('Dépenses par catégorie',['Catégorie','Montant'],Object.entries(cats).map(([k,v])=>[k,f2(v)]).concat([['TOTAL',f2(sum(D))]]));
     const W=D.filter(r=>r.receipt_url),num={};W.forEach((r,k)=>num[r.id]=k+1);
-    T('Détail des dépenses',['Date','Fournisseur','Catégorie','Commentaire','Justificatif','Montant'],D.map(r=>[fr(r.date),r.vendor||'',r.category||'',r.comment||'',r.receipt_url?'':'-',f2(r.amount)]),{
-      didDrawCell:h=>{
-        if(h.section!=='body'||h.column.index!==4)return;
-        const r=D[h.row.index],url=safeUrl(r&&r.receipt_url);if(!url)return;
-        doc.setFontSize(9);doc.setTextColor(37,99,235);
-        doc.textWithLink('Pièce '+num[r.id],h.cell.x+2,h.cell.y+h.cell.height*.65,{url});
-        doc.setTextColor(0);
-      }
+    byCat(D).forEach(([c,Dc])=>{
+      const body=Dc.map(r=>[fr(r.date),r.vendor||'',r.comment||'',r.receipt_url?'':'-',f2(r.amount)])
+        .concat([[{content:'Sous-total '+c,colSpan:4,styles:{halign:'right',fontStyle:'bold'}},{content:f2(sum(Dc)),styles:{fontStyle:'bold'}}]]);
+      T(c+' ('+Dc.length+')',['Date','Fournisseur','Commentaire','Justificatif','Montant'],body,{
+        didDrawCell:h=>{
+          if(h.section!=='body'||h.column.index!==3)return;
+          const r=Dc[h.row.index],url=safeUrl(r&&r.receipt_url);if(!url)return;
+          doc.setFontSize(9);doc.setTextColor(37,99,235);
+          doc.textWithLink('Pièce '+num[r.id],h.cell.x+2,h.cell.y+h.cell.height*.65,{url});
+          doc.setTextColor(0);
+        }
+      });
     });
     if(W.length){
       if(cy>240){doc.addPage();cy=18}
